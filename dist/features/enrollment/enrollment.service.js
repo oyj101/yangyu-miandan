@@ -43,7 +43,10 @@ const errors_1 = require("../../lib/errors");
 const enrollment_repo_1 = require("./enrollment.repo");
 const card_repo_1 = require("../card/card.repo");
 const db_1 = require("../../lib/db");
-async function purchase(userId, cardId) {
+/** 20261017 购买接支付(PO): pay=true 时走 8100 统一支付真源下单(NATIVE/JSAPI), 落 pay_order_no + pay_status=unpaid;
+ * 支付成功后(统一回调置 paid) 核销才放行。pay=false/缺省=免费领卡模式(pay_status=none), 与既有行为一致。
+ * 基础能力不得自实现: 微信下单/查单/退款一律经 8100 /api/v2/yangyu/pay/*。 */
+async function purchase(userId, cardId, opts = {}) {
     const card = await (0, card_repo_1.findCardById)(cardId);
     if (!card)
         throw (0, errors_1.notFound)("免单卡不存在");
@@ -54,13 +57,43 @@ async function purchase(userId, cardId) {
     const rewardTotal = Math.round(card.price * effectiveCoverage * 100) / 100;
     const existing = await (0, enrollment_repo_1.findActiveByUserCard)(userId, cardId);
     const reEnrolled = !!existing;
-    return (0, enrollment_repo_1.insertEnrollment)({
+    const e = await (0, enrollment_repo_1.insertEnrollment)({
         userId,
         cardId,
         merchantId: card.merchantId,
         rewardTotal,
         reEnrolled,
     });
+    if (opts.pay) {
+        try {
+            const cfg = await Promise.resolve().then(() => __importStar(require("../../config")));
+            const mu = await (0, db_1.query)("SELECT ai_uid FROM merchant_user WHERE user_id = ? LIMIT 1", [userId]);
+            const aiUid = Number(mu.rows[0]?.ai_uid || 0);
+            const amountFen = Math.round(Number(card.price) * 100);
+            if (aiUid && amountFen > 0) {
+                const resp = await fetch(`${cfg.config.wallet.base}/yangyu/pay/create`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json", "X-Service-Key": cfg.config.wallet.serviceKey },
+                    body: JSON.stringify({
+                        uid: aiUid, amount_fen: amountFen, channel: opts.channel || "native",
+                        openid: opts.openid || "", biz_ref: e.id, description: `养鱼免单卡 ${cardId}`,
+                    }),
+                });
+                const j = await resp.json().catch(() => ({}));
+                const orderNo = j?.data?.order_no;
+                if (orderNo) {
+                    await (0, db_1.query)("UPDATE enrollment SET pay_order_no=?, pay_status='unpaid' WHERE id=?", [orderNo, e.id]);
+                    e.payOrderNo = orderNo;
+                    e.payStatus = "unpaid";
+                    e.payParams = j?.data?.pay_params || null;
+                }
+            }
+        }
+        catch (err) {
+            console.error("[purchase] pay create failed", { userId, cardId, err: err?.message });
+        }
+    }
+    return e;
 }
 async function getEnrollment(id) {
     const e = await (0, enrollment_repo_1.findEnrollment)(id);

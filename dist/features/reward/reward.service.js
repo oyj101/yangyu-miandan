@@ -21,6 +21,10 @@ async function computeOnCheckin(enrollmentId, merchantId) {
         throw (0, errors_1.notFound)("入渔记录不存在");
     if (e.merchantId !== merchantId)
         throw (0, errors_1.notFound)("入渔记录不属于该商家");
+    // 20261017 付费模式: 下单未支付的入渔不允许核销(防逃单)。免费领卡模式 pay_status=none, 不受影响。
+    if (e.pay_status === "unpaid" || e.payStatus === "unpaid") {
+        throw (0, errors_1.conflict)("该入渔尚未完成支付，请先支付后再核销");
+    }
     const card = await (0, card_repo_1.findCardById)(e.cardId);
     if (!card)
         throw (0, errors_1.notFound)("免单卡不存在");

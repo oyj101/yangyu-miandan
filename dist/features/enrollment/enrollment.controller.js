@@ -39,12 +39,13 @@ const zod_1 = require("zod");
 const auth_1 = require("../../middleware/auth");
 const http_1 = require("../../lib/http");
 const svc = __importStar(require("./enrollment.service"));
-const purchaseSchema = zod_1.z.object({ cardId: zod_1.z.string().min(1) });
+const purchaseSchema = zod_1.z.object({ cardId: zod_1.z.string().min(1), pay: zod_1.z.boolean().optional(), channel: zod_1.z.string().optional(), openid: zod_1.z.string().optional() });
 exports.enrollmentRouter = (0, express_1.Router)();
 exports.enrollmentRouter.post("/purchase", (0, auth_1.auth)(["USER"]), async (req, res, next) => {
     try {
-        const { cardId } = purchaseSchema.parse(req.body);
-        const e = await svc.purchase(req.user.userId, cardId);
+        const body = purchaseSchema.parse(req.body);
+        const cardId = body.cardId;
+        const e = await svc.purchase(req.user.userId, cardId, { pay: body.pay, channel: body.channel, openid: body.openid });
         // 20261017 转介绍30%触发(异fire-and-forget, 不阻塞购卡响应)
         Promise.resolve().then(() => __importStar(require("../reward/reward.service"))).then((m) => m.triggerIntroBonus(req.user.userId, cardId))
             .catch((err) => console.error("[intro] trigger failed", err?.message));

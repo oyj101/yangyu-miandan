@@ -23,6 +23,9 @@ function mapRow(r) {
         rewardTotal: Number(r.reward_total),
         enrollAt: r.enroll_at,
         reEnrolled: !!r.re_enrolled,
+        // 20261017 付费模式字段: none=免费领卡 / unpaid=已下单待付 / paid=已支付
+        payOrderNo: r.pay_order_no || null,
+        payStatus: (r.pay_status || "none"),
     };
 }
 // 主键应用层生成 + 插入后回读（同 card.repo：不依赖 INSERT..RETURNING）
