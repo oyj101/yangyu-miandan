@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.listPendingCards = exports.listMerchantCards = void 0;
 exports.createApplication = createApplication;
 exports.review = review;
+exports.listPublicCards = listPublicCards;
 exports.getGlobalParams = getGlobalParams;
 exports.setGlobalParam = setGlobalParam;
 const config_1 = require("../../config");
@@ -54,6 +55,10 @@ async function review(cardId, approve, operator, rejectReason) {
 }
 exports.listMerchantCards = card_repo_1.listByMerchant;
 exports.listPendingCards = card_repo_1.listPending;
+// [Task-213] C 端「拼场大厅」：返回所有已上架免单卡。
+async function listPublicCards() {
+    return (0, card_repo_1.listPublic)();
+}
 async function getGlobalParams() {
     const res = await (0, db_1.query)(`SELECT * FROM global_param`);
     return res.rows.map((r) => ({

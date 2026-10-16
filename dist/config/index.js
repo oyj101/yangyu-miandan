@@ -46,5 +46,10 @@ exports.config = {
         perMerchantQuota: num("PER_MERCHANT_QUOTA", 200),
         yangyuWeeklyThreshold: num("YANGYU_WEEKLY_THRESHOLD", 5),
     },
+    // 资金动账经主平台 wallet_service（X-Service-Key 服务间鉴权），不裸写表。
+    wallet: {
+        base: process.env.WALLET_BASE ?? "http://127.0.0.1:8100/api/v2",
+        serviceKey: process.env.WALLET_SERVICE_KEY ?? "",
+    },
 };
 //# sourceMappingURL=index.js.map

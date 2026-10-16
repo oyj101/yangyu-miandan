@@ -6,6 +6,7 @@ exports.findActiveByUserCard = findActiveByUserCard;
 exports.updateEnrollState = updateEnrollState;
 exports.setEnrollStatus = setEnrollStatus;
 exports.listByMerchant = listByMerchant;
+exports.listByUser = listByUser;
 exports.toState = toState;
 const db_1 = require("../../lib/db");
 function mapRow(r) {
@@ -59,6 +60,12 @@ async function listByMerchant(merchantId, statusFilter) {
     }
     sql += ` ORDER BY enroll_at DESC`;
     const res = await (0, db_1.query)(sql, params);
+    return res.rows.map(mapRow);
+}
+// [Task-213] 我的入渔列表（C 端「我的免单」）：按联邦用户 user_id 反查全部入渔记录。
+// enrollment.user_id 锚定 merchant_user.user_id（如 au_1），与 federate 注入的 req.fedUser.userId 一致。
+async function listByUser(userId) {
+    const res = await (0, db_1.query)(`SELECT * FROM enrollment WHERE user_id = ? ORDER BY enroll_at DESC`, [userId]);
     return res.rows.map(mapRow);
 }
 function toState(e) {

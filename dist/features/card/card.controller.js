@@ -115,5 +115,15 @@ exports.cardRouter.put("/params/:key", (0, auth_1.auth)(["OPERATOR"]), async (re
         next(e);
     }
 });
+// [Task-213] 公开免单卡列表（C 端「拼场大厅」）：联邦登录用户可浏览已上架卡片。
+exports.cardRouter.get("/public", (0, auth_1.auth)(["USER", "MERCHANT", "OPERATOR", "CASHIER"]), async (_req, res, next) => {
+    try {
+        const cards = await svc.listPublicCards();
+        (0, http_1.ok)(res, cards);
+    }
+    catch (e) {
+        next(e);
+    }
+});
 exports.default = exports.cardRouter;
 //# sourceMappingURL=card.controller.js.map

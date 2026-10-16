@@ -6,6 +6,7 @@ exports.countActiveByMerchant = countActiveByMerchant;
 exports.setCardStatus = setCardStatus;
 exports.listByMerchant = listByMerchant;
 exports.listPending = listPending;
+exports.listPublic = listPublic;
 const db_1 = require("../../lib/db");
 function mapRow(r) {
     return {
@@ -75,6 +76,12 @@ async function listByMerchant(merchantId) {
 }
 async function listPending() {
     const res = await (0, db_1.query)(`SELECT * FROM card WHERE status = 'pending' ORDER BY created_at ASC`);
+    return res.rows.map(mapRow);
+}
+// [Task-213] 公开免单卡列表（C 端「拼场大厅」）：仅返回已上架(active)卡片。
+// 注：merchant_id 锚定主站 zy_merchants.id，商户展示名由 C 端经主平台门店接口解析（后续迭代）。
+async function listPublic() {
+    const res = await (0, db_1.query)(`SELECT * FROM card WHERE status = 'active' ORDER BY created_at DESC`);
     return res.rows.map(mapRow);
 }
 //# sourceMappingURL=card.repo.js.map

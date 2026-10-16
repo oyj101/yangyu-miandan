@@ -51,6 +51,17 @@ exports.enrollmentRouter.post("/purchase", (0, auth_1.auth)(["USER"]), async (re
         next(e2);
     }
 });
+// [Task-213] 我的入渔列表（C 端「我的免单」）：须置于 GET /:id 之前，
+// 否则 /me 会被 :id 路由捕获为 id="me" 导致 404。
+exports.enrollmentRouter.get("/me", (0, auth_1.auth)(["USER", "MERCHANT", "OPERATOR", "CASHIER"]), async (req, res, next) => {
+    try {
+        const list = await svc.listUserEnrollments(req.user.userId);
+        (0, http_1.ok)(res, list);
+    }
+    catch (e2) {
+        next(e2);
+    }
+});
 exports.enrollmentRouter.get("/:id", (0, auth_1.auth)(["USER", "MERCHANT", "OPERATOR", "CASHIER"]), async (req, res, next) => {
     try {
         const e = await svc.getEnrollment(req.params.id);

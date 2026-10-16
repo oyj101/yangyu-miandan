@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.listMerchantEnrollments = void 0;
 exports.purchase = purchase;
 exports.getEnrollment = getEnrollment;
+exports.listUserEnrollments = listUserEnrollments;
 const errors_1 = require("../../lib/errors");
 const enrollment_repo_1 = require("./enrollment.repo");
 const card_repo_1 = require("../card/card.repo");
@@ -32,4 +33,8 @@ async function getEnrollment(id) {
     return e;
 }
 exports.listMerchantEnrollments = enrollment_repo_1.listByMerchant;
+// [Task-213] C 端「我的免单」：列出当前联邦用户全部入渔记录。
+async function listUserEnrollments(userId) {
+    return (0, enrollment_repo_1.listByUser)(userId);
+}
 //# sourceMappingURL=enrollment.service.js.map
