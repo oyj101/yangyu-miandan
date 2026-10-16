@@ -15,7 +15,7 @@ exports.authRouter = (0, express_1.Router)();
 exports.authRouter.post("/dev-login", (req, res, next) => {
     try {
         if (process.env.NODE_ENV === "production") {
-            return next((0, errors_1.unauthorized)("生产环境禁用开发登录"));
+            return next((0, errors_1.unauthorized)("生产环境请使用 ai 站统一登录（ai.ws.hi.cn），联邦身份自动贯通本站"));
         }
         const { user_id, role, merchant_id } = loginSchema.parse(req.body);
         const user = { userId: user_id, role: role, merchantId: merchant_id };

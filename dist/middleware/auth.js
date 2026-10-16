@@ -22,6 +22,15 @@ function signRefreshToken(user) {
 }
 function auth(roles) {
     return (req, _res, next) => {
+        // [Task-193] 联邦统一身份优先：federate 中间件已验过主站 /auth/me 并挂 req.fedUser
+        if (req.fedUser) {
+            if (roles && roles.length && !roles.includes(req.fedUser.role)) {
+                logger_1.logger.warn({ userId: req.fedUser.userId, role: req.fedUser.role, need: roles, via: "federated" }, "RBAC 拒绝");
+                return next((0, errors_1.unauthorized)("角色无权访问"));
+            }
+            req.user = { userId: req.fedUser.userId, role: req.fedUser.role, merchantId: req.fedUser.merchantId };
+            return next();
+        }
         const header = req.headers.authorization;
         if (!header || !header.startsWith("Bearer ")) {
             return next((0, errors_1.unauthorized)("缺少访问令牌"));

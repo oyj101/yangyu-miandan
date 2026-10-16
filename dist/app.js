@@ -11,6 +11,7 @@ const config_1 = require("./config");
 const logger_1 = require("./lib/logger");
 const requestId_1 = require("./middleware/requestId");
 const errorHandler_1 = require("./middleware/errorHandler");
+const federation_1 = require("./middleware/federation");
 const card_controller_1 = require("./features/card/card.controller");
 const enrollment_controller_1 = require("./features/enrollment/enrollment.controller");
 const checkin_controller_1 = require("./features/checkin/checkin.controller");
@@ -24,6 +25,8 @@ function createApp() {
     }));
     app.use(express_1.default.json({ limit: "1mb" }));
     app.use(requestId_1.requestId);
+    // [Task-193] 联邦统一身份：解析 ai 站 token -> 主站 /auth/me -> 本地域档案
+    app.use(federation_1.federate);
     app.use(express_1.default.static(path_1.default.join(__dirname, "..", "public")));
     app.get("/health", (_req, res) => res.json({ ok: true, status: "up" }));
     app.get("/ready", (_req, res) => res.json({ ok: true, status: "ready" }));
