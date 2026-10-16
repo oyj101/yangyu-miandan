@@ -28,7 +28,11 @@ function auth(roles) {
                 logger_1.logger.warn({ userId: req.fedUser.userId, role: req.fedUser.role, need: roles, via: "federated" }, "RBAC 拒绝");
                 return next((0, errors_1.unauthorized)("角色无权访问"));
             }
-            req.user = { userId: req.fedUser.userId, role: req.fedUser.role, merchantId: req.fedUser.merchantId };
+            req.user = {
+                userId: req.fedUser.userId,
+                role: req.fedUser.role,
+                merchantId: req.fedUser.merchantId,
+            };
             return next();
         }
         const header = req.headers.authorization;
