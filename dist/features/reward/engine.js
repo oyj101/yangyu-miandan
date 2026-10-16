@@ -13,7 +13,7 @@ exports.INITIAL_STATE = {
     rewardPaid: 0,
     rewardTotal: 0,
 };
-exports.TOTAL_MISS_EXIT = 6; // 累计未达标达 6 次 → 退出
+exports.TOTAL_MISS_EXIT = 5; // 20261017 PO 规则: 累计未达标达 5 次 → 自动退出(产品服务照常, 仅停奖)
 /**
  * 周末评估某一自然周的养鱼达标情况，返回新状态。
  * @param met 本周是否达标（养鱼打卡 ≥ 阈值）
@@ -25,16 +25,17 @@ function evaluateWeekly(state, met) {
     const consecutiveMiss = met ? 0 : state.consecutiveMiss + 1;
     let status = state.status;
     let pauseRemaining = state.pauseRemaining;
+    // 20261017 PO 惩罚规则: 缺一天(未达标周)罚停 1 次 → 连续 2 次罚停 3 次 → 连续 3 次或累计 5 次自动退出
     if (!met) {
         if (status === "normal" && consecutiveMiss === 1) {
-            status = "pause2";
-            pauseRemaining = 2;
+            status = "pause1";
+            pauseRemaining = 1;
         }
-        else if (status === "pause2" && consecutiveMiss === 2) {
-            status = "pause6";
-            pauseRemaining = 6;
+        else if (status === "pause1" && consecutiveMiss === 2) {
+            status = "pause3";
+            pauseRemaining = 3;
         }
-        else if (status === "pause6" && consecutiveMiss >= 3) {
+        else if (status === "pause3" && consecutiveMiss >= 3) {
             status = "exited";
         }
         else if (totalMissCount >= exports.TOTAL_MISS_EXIT) {
@@ -43,7 +44,7 @@ function evaluateWeekly(state, met) {
     }
     else {
         // 达标：清除暂停计数，回到正常
-        if (status === "pause2" || status === "pause6") {
+        if (status === "pause1" || status === "pause3" || status === "pause2" || status === "pause6") {
             status = "normal";
             pauseRemaining = 0;
         }

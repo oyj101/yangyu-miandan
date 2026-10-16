@@ -45,6 +45,9 @@ exports.enrollmentRouter.post("/purchase", (0, auth_1.auth)(["USER"]), async (re
     try {
         const { cardId } = purchaseSchema.parse(req.body);
         const e = await svc.purchase(req.user.userId, cardId);
+        // 20261017 转介绍30%触发(异fire-and-forget, 不阻塞购卡响应)
+        Promise.resolve().then(() => __importStar(require("../reward/reward.service"))).then((m) => m.triggerIntroBonus(req.user.userId, cardId))
+            .catch((err) => console.error("[intro] trigger failed", err?.message));
         (0, http_1.created)(res, e);
     }
     catch (e2) {
@@ -53,6 +56,16 @@ exports.enrollmentRouter.post("/purchase", (0, auth_1.auth)(["USER"]), async (re
 });
 // [Task-213] 我的入渔列表（C 端「我的免单」）：须置于 GET /:id 之前，
 // 否则 /me 会被 :id 路由捕获为 id="me" 导致 404。
+// 20261017 退款: 30%前~70%内且无违规, 随时退, 扣所有奖励
+exports.enrollmentRouter.post("/:id/refund", (0, auth_1.auth)(["USER"]), async (req, res, next) => {
+    try {
+        const r = await svc.refundEnrollment(req.user.userId, req.params.id);
+        (0, http_1.ok)(res, r);
+    }
+    catch (e2) {
+        next(e2);
+    }
+});
 exports.enrollmentRouter.get("/me", (0, auth_1.auth)(["USER", "MERCHANT", "OPERATOR", "CASHIER"]), async (req, res, next) => {
     try {
         const list = await svc.listUserEnrollments(req.user.userId);

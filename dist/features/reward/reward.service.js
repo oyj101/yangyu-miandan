@@ -1,6 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.computeOnCheckin = computeOnCheckin;
+exports.issueIntroBonus = issueIntroBonus;
+exports.triggerIntroBonus = triggerIntroBonus;
 exports.evaluateWeek = evaluateWeek;
 exports.listRewards = listRewards;
 const db_1 = require("../../lib/db");
@@ -23,7 +25,9 @@ async function computeOnCheckin(enrollmentId, merchantId) {
     if (!card)
         throw (0, errors_1.notFound)("免单卡不存在");
     const state = (0, enrollment_repo_1.toState)(e);
-    const remaining = Math.max(0, e.rewardTotal - e.rewardPaid);
+    // 20261017 PO 规则: 常规核销发奖封顶 70% 应发总额; 剩余 30% 须「成功转介绍同等价值项目」后一次性发放(see issueIntroBonus)。
+    const rewardableCeil = Math.round(e.rewardTotal * 0.7 * 100) / 100;
+    const remaining = Math.max(0, rewardableCeil - e.rewardPaid);
     // 20261016 双条件(PO 规则修正): 本周养鱼(聊天投喂)天数 >= 阈值(global_param yangyu_weekly_threshold) + 到店核销 → 即时发奖(余额)。
     // 数据真源=8100 chat_history, 经 /api/v2/yangyu/feed-days。不达标或数据不可用 → 核销照记但不发奖(资金谨慎)。
     const feed = await fetchFeedDays(e.userId);
@@ -80,6 +84,98 @@ async function computeOnCheckin(enrollmentId, merchantId) {
 }
 /** 20261016 双条件数据源: 本周养鱼(聊天投喂)天数 + 达标阈值(global_param)。
  * 聊天互动真源=8100 chat_history, 经 /api/v2/yangyu/feed-days (X-Service-Key)。失败降级为不可用(不发奖)。 */
+/** 20261017 转介绍 30%(PO 规则): 被推荐人成功购买同等价值项目(同价卡)后,
+ * 推荐人常规封顶 70% 之外的剩余部分一次性发放 → 100% 免单闭环。
+ * 防重: 仅 status=normal 且 rewardPaid<rewardTotal 时发放。 */
+async function issueIntroBonus(enrollmentId, introAmount, remark) {
+    const e = await (0, enrollment_repo_1.findEnrollment)(enrollmentId);
+    if (!e)
+        return false;
+    if (e.status !== "normal")
+        return false;
+    const paid = Number(e.rewardPaid);
+    const total = Number(e.rewardTotal);
+    if (paid >= total)
+        return false;
+    const amount = Math.min(Number(introAmount), Math.round((total - paid) * 100) / 100);
+    if (!(amount > 0))
+        return false;
+    const rewardId = (0, db_1.newId)();
+    const ns = { ...(0, enrollment_repo_1.toState)(e), rewardPaid: Math.round((paid + amount) * 100) / 100 };
+    await (0, db_1.withTx)(async (client) => {
+        await client.query(`INSERT INTO reward (id, enrollment_id, user_id, amount, status)
+       VALUES (?,?,?,?,'issued')`, [rewardId, e.id, e.userId, amount]);
+        await (0, enrollment_repo_1.updateEnrollState)(client, e.id, ns);
+    });
+    // 即时余额动账(与核销发奖同通道; 失败仅日志, 奖励记录已落库可对账)
+    try {
+        const mu = await (0, db_1.query)("SELECT ai_uid FROM merchant_user WHERE user_id = ? LIMIT 1", [e.userId]);
+        const aiUid = mu.rows[0]?.ai_uid;
+        if (aiUid) {
+            const resp = await fetch(`${config_1.config.wallet.base}/wallet/change`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-Service-Key": config_1.config.wallet.serviceKey },
+                body: JSON.stringify({
+                    uid: Number(aiUid), asset: "balance", amount: Number(amount),
+                    biz_type: "yangyu:reward", ledger: "zy",
+                    remark: `${remark} 转介绍30% 入渔 ${enrollmentId} 奖励 ${rewardId}`, biz_id: 0,
+                }),
+            });
+            const j = await resp.json().catch(() => ({}));
+            if (j && (j.code === 0 || j.code === "0") && j.data && j.data.ok) {
+                console.info("[reward] 转介绍30%余额动账成功", { aiUid, amount, flowNo: j.data.flow_no });
+            }
+            else {
+                console.error("[reward] INTRO_CREDIT_FAILED", { userId: e.userId, amount, resp: j });
+            }
+        }
+    }
+    catch (err) {
+        console.error("[reward] INTRO_CREDIT_ERROR", { enrollmentId, err: err?.message });
+    }
+    return true;
+}
+/** 20261017 转介绍触发器(购卡侧): 被推荐人购卡成功后, 查其主站关系链上级 →
+ * 上级名下「常规已领≥70% 且未发满 且 同价卡」的入渔 → 一次性发最后 30%。 */
+async function triggerIntroBonus(buyerUserId, cardId) {
+    try {
+        const card0 = await (0, card_repo_1.findCardById)(cardId);
+        if (!card0)
+            return;
+        const cardPrice = Number(card0.price);
+        const mu = await (0, db_1.query)("SELECT ai_uid FROM merchant_user WHERE user_id = ? LIMIT 1", [buyerUserId]);
+        const aiUid = mu.rows[0]?.ai_uid;
+        if (!aiUid)
+            return;
+        const r = await fetch(`${config_1.config.wallet.base}/yangyu/referrer?uid=${Number(aiUid)}`, { headers: { "X-Service-Key": config_1.config.wallet.serviceKey } });
+        if (!r.ok)
+            return;
+        const j = await r.json().catch(() => null);
+        const referrerUid = Number(j?.data?.referrer) || 0;
+        if (!referrerUid)
+            return;
+        const rm = await (0, db_1.query)("SELECT user_id FROM merchant_user WHERE ai_uid = ? LIMIT 1", [String(referrerUid)]);
+        const referrerLocal = rm.rows[0]?.user_id;
+        if (!referrerLocal || referrerLocal === buyerUserId)
+            return;
+        const list = await (0, db_1.query)(`SELECT en.id, en.reward_paid, en.reward_total FROM enrollment en
+       JOIN card c ON c.id = en.card_id
+       WHERE en.user_id = ? AND en.status = 'normal' AND c.price = ?
+       AND en.reward_paid >= ROUND(en.reward_total * 0.7, 2)
+       AND en.reward_paid < en.reward_total
+       LIMIT 1`, [referrerLocal, Number(cardPrice)]);
+        const row = list.rows[0];
+        if (!row)
+            return;
+        const bonus = Math.round((Number(row.reward_total) - Number(row.reward_paid)) * 100) / 100;
+        const ok = await issueIntroBonus(row.id, bonus, "养鱼免单 70% 后转介绍达成");
+        if (ok)
+            console.info("[reward] 转介绍30%已发放", { referrer: referrerLocal, enrollmentId: row.id, bonus });
+    }
+    catch (err) {
+        console.error("[reward] INTRO_TRIGGER_ERROR", { buyerUserId, err: err?.message });
+    }
+}
 async function fetchFeedDays(userId) {
     const fallback = { ok: false, days: 0, threshold: 5 };
     try {
@@ -128,7 +224,7 @@ async function creditFishBeans(userId, amount, enrollmentId, rewardId) {
                 amount: Number(amount),
                 biz_type: "yangyu:reward",
                 ledger: "zy",
-                remark: `养鱼免单奖励 入渔 ${enrollmentId} 奖励 ${rewardId}`,
+                remark: `养鱼免单奖励(余额) 入渔 ${enrollmentId} 奖励 ${rewardId}`,
                 biz_id: 0,
             }),
         });
