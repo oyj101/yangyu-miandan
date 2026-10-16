@@ -1,0 +1,74 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.insertEnrollment = insertEnrollment;
+exports.findEnrollment = findEnrollment;
+exports.findActiveByUserCard = findActiveByUserCard;
+exports.updateEnrollState = updateEnrollState;
+exports.setEnrollStatus = setEnrollStatus;
+exports.listByMerchant = listByMerchant;
+exports.toState = toState;
+const db_1 = require("../../lib/db");
+function mapRow(r) {
+    return {
+        id: r.id,
+        userId: r.user_id,
+        cardId: r.card_id,
+        merchantId: r.merchant_id,
+        status: r.status,
+        consecutiveMiss: r.consecutive_miss,
+        totalMissCount: r.total_miss_count,
+        pauseRemaining: r.pause_remaining,
+        rewardPaid: Number(r.reward_paid),
+        rewardTotal: Number(r.reward_total),
+        enrollAt: r.enroll_at,
+        reEnrolled: !!r.re_enrolled,
+    };
+}
+// 主键应用层生成 + 插入后回读（同 card.repo：不依赖 INSERT..RETURNING）
+async function insertEnrollment(input) {
+    const id = (0, db_1.newId)();
+    await (0, db_1.query)(`INSERT INTO enrollment (id, user_id, card_id, merchant_id, reward_total, re_enrolled)
+     VALUES (?,?,?,?,?,?)`, [id, input.userId, input.cardId, input.merchantId, input.rewardTotal, input.reEnrolled]);
+    const row = await findEnrollment(id);
+    if (!row)
+        throw new Error("insertEnrollment 回读失败");
+    return row;
+}
+async function findEnrollment(id) {
+    const res = await (0, db_1.query)(`SELECT * FROM enrollment WHERE id = ?`, [id]);
+    return res.rows[0] ? mapRow(res.rows[0]) : null;
+}
+async function findActiveByUserCard(userId, cardId) {
+    const res = await (0, db_1.query)(`SELECT * FROM enrollment WHERE user_id = ? AND card_id = ? AND status NOT IN ('exited','refunded')`, [userId, cardId]);
+    return res.rows[0] ? mapRow(res.rows[0]) : null;
+}
+async function updateEnrollState(conn, id, state) {
+    await conn.query(`UPDATE enrollment
+     SET status=?, consecutive_miss=?, total_miss_count=?, pause_remaining=?, reward_paid=?
+     WHERE id=?`, [state.status, state.consecutiveMiss, state.totalMissCount, state.pauseRemaining, state.rewardPaid, id]);
+}
+async function setEnrollStatus(conn, id, status) {
+    await conn.query(`UPDATE enrollment SET status=? WHERE id=?`, [status, id]);
+}
+async function listByMerchant(merchantId, statusFilter) {
+    const params = [merchantId];
+    let sql = `SELECT * FROM enrollment WHERE merchant_id = ?`;
+    if (statusFilter) {
+        sql += ` AND status = ?`;
+        params.push(statusFilter);
+    }
+    sql += ` ORDER BY enroll_at DESC`;
+    const res = await (0, db_1.query)(sql, params);
+    return res.rows.map(mapRow);
+}
+function toState(e) {
+    return {
+        status: e.status,
+        consecutiveMiss: e.consecutiveMiss,
+        totalMissCount: e.totalMissCount,
+        pauseRemaining: e.pauseRemaining,
+        rewardPaid: e.rewardPaid,
+        rewardTotal: e.rewardTotal,
+    };
+}
+//# sourceMappingURL=enrollment.repo.js.map
