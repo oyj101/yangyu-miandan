@@ -24,6 +24,7 @@ exports.ensureFederated = ensureFederated;
 const config_1 = require("../config");
 const logger_1 = require("../lib/logger");
 const db_1 = require("../lib/db");
+// 主键用 lib/db 的 newId()（crypto.randomUUID）——⚠️ 勿引 uuid 包：本服务未安装该依赖
 // 联邦校验结果短缓存（token -> { aiUid, user, exp }），减少 8100 往返；与 JWT 自身有效期解耦
 const _fedCache = new Map();
 const FED_TTL_MS = 120 * 1000;
@@ -50,10 +51,9 @@ async function ensureFederated(aiUid, info) {
     const exist = await findByAiUid(aiUid);
     if (exist)
         return exist;
-    const { v4: uuidv4 } = require("uuid");
     const localId = "au_" + aiUid;
     await db_1.pool.query("INSERT INTO merchant_user (id, user_id, ai_uid, merchant_id, role) VALUES (?, ?, ?, ?, ?)", [
-        uuidv4(), localId, String(aiUid), (info === null || info === void 0 ? void 0 : info.merchantId) || "", "USER",
+        db_1.newId(), localId, String(aiUid), (info === null || info === void 0 ? void 0 : info.merchantId) || "", "USER",
     ]);
     logger_1.logger.info({ aiUid, localId }, "federated_profile_created");
     return { id: localId, user_id: localId, ai_uid: String(aiUid), merchant_id: "", role: "USER" };
