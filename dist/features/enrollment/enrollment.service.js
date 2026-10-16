@@ -37,6 +37,7 @@ exports.listMerchantEnrollments = void 0;
 exports.purchase = purchase;
 exports.getEnrollment = getEnrollment;
 exports.refundEnrollment = refundEnrollment;
+exports.getEnrollmentUserId = getEnrollmentUserId;
 exports.listUserEnrollments = listUserEnrollments;
 const errors_1 = require("../../lib/errors");
 const enrollment_repo_1 = require("./enrollment.repo");
@@ -67,13 +68,14 @@ async function getEnrollment(id) {
         throw (0, errors_1.notFound)("入渔记录不存在");
     return e;
 }
-/** 20261017 退款(PO 规则): 进度 30% 前~70% 内且无违规(养鱼零未达标) → 随时可退, 扣除所有已发奖励。
- * 退款额 = 卡价 - 已领奖励; 同步收回已发奖励余额(wallet debit, 失败记 audit 人工处理)。 */
-async function refundEnrollment(userId, enrollmentId) {
+/** 20261017 PO: 退款通道可选 —— balance=退到钱包余额(即时); original=微信原路退(支付接入后执行, 先落 pending 单据)。
+ * 运营后台(OPERATOR)可选通道并代退任意入渔; 用户自助退默认 balance。 */
+async function refundEnrollment(userId, enrollmentId, opts = {}) {
+    const channel = opts.channel === "original" ? "original" : "balance";
     const e = await (0, enrollment_repo_1.findEnrollment)(enrollmentId);
     if (!e)
         throw (0, errors_1.notFound)("入渔记录不存在");
-    if (e.userId !== userId)
+    if (!opts.byOperator && e.userId !== userId)
         throw (0, errors_1.forbidden)("只能退自己的入渔");
     if (e.status !== "normal")
         throw (0, errors_1.badRequest)("当前状态不可退款");
@@ -92,28 +94,55 @@ async function refundEnrollment(userId, enrollmentId) {
         await client.query("INSERT INTO audit (id, operator, action, ref_type, ref_id, `before`, `after`) VALUES (?,?,?,?,?,?,?)", [(0, db_1.newId)(), userId, "enrollment.refund", "enrollment", enrollmentId, before,
             JSON.stringify({ status: "refunded", refundAmount })]);
     });
-    // 收回已发奖励(余额 debit); 失败不影响退款标记, audit 已留痕
-    let recovered = false;
-    try {
-        const mu = await (0, db_1.query)("SELECT ai_uid FROM merchant_user WHERE user_id = ? LIMIT 1", [userId]);
-        const aiUid = mu.rows[0]?.ai_uid;
-        const cfgMod = await Promise.resolve().then(() => __importStar(require("../../config")));
-        const svcKey = (cfgMod.config?.wallet?.serviceKey) || (await Promise.resolve().then(() => __importStar(require("../../config")))).config.wallet.serviceKey;
-        if (aiUid && svcKey) {
-            const resp = await fetch(`${(cfgMod.config?.wallet?.base) || (await Promise.resolve().then(() => __importStar(require("../../config")))).config.wallet.base}/wallet/change`, {
+    // 资金面: ①收回已发奖励(奖励扣除) ②退款按通道执行
+    const cfg = await Promise.resolve().then(() => __importStar(require("../../config")));
+    const svcKey = cfg.config.wallet.serviceKey;
+    const base = cfg.config.wallet.base;
+    const mu = await (0, db_1.query)("SELECT ai_uid FROM merchant_user WHERE user_id = ? LIMIT 1", [e.userId]);
+    const aiUid = Number(mu.rows[0]?.ai_uid || 0);
+    const callWallet = async (amount, bizType, remark) => {
+        if (!aiUid || !svcKey)
+            return false;
+        try {
+            const resp = await fetch(`${base}/wallet/change`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json", "X-Service-Key": svcKey },
-                body: JSON.stringify({ uid: Number(aiUid), asset: "balance", amount: -Number(e.rewardPaid),
-                    biz_type: "yangyu:refund", ledger: "zy", remark: `退款收回已发奖励 入渔 ${enrollmentId}`, biz_id: 0 }),
+                body: JSON.stringify({ uid: aiUid, asset: "balance", amount, biz_type: bizType, ledger: "zy", remark, biz_id: 0 }),
             });
             const j = await resp.json().catch(() => ({}));
-            recovered = !!(j && (j.code === 0 || j.code === "0") && j.data && j.data.ok);
+            return !!(j && (j.code === 0 || j.code === "0") && j.data && j.data.ok);
         }
+        catch (err) {
+            console.error("[refund] wallet call failed", { enrollmentId, err: err?.message });
+            return false;
+        }
+    };
+    let recovered = false;
+    if (Number(e.rewardPaid) > 0) {
+        recovered = await callWallet(-Number(e.rewardPaid), "yangyu:refund", `退款收回已发奖励 入渔 ${enrollmentId}`);
+        if (!recovered)
+            console.error("[refund] reward recovery failed, see audit", { enrollmentId });
     }
-    catch (err) {
-        console.error("[refund] recover failed", { enrollmentId, err: err?.message });
+    // 退款本金: 当前免费领卡无实付, 接支付后 balance=即时到账 / original=微信原路退。无实付仅记账不发放。
+    let refunded = false;
+    let refundNote = "";
+    if (channel === "balance") {
+        refunded = await callWallet(refundAmount, "yangyu:refund_payout", `退款到余额 入渔 ${enrollmentId} 通道:balance`);
+        refundNote = refunded ? "已退到余额" : "余额退款失败, 待人工";
     }
-    return { refundAmount, recovered, status: "refunded" };
+    else {
+        refundNote = "原路退通道: 待微信支付退款API接入后执行(pending)";
+        await (0, db_1.withTx)(async (client) => {
+            await client.query("INSERT INTO audit (id, operator, action, ref_type, ref_id, `before`, `after`) VALUES (?,?,?,?,?,?,?)", [(0, db_1.newId)(), userId, "enrollment.refund.original_pending", "enrollment", enrollmentId, before,
+                JSON.stringify({ channel, refundAmount, state: "pending_wechat_refund_api" })]);
+        });
+    }
+    return { refundAmount, channel, recovered, refunded, refundNote, status: "refunded" };
+}
+/** 退款权限判定辅助: 返回 enrollment 归属 userId(不存在返回空串) */
+async function getEnrollmentUserId(enrollmentId) {
+    const e = await (0, enrollment_repo_1.findEnrollment)(enrollmentId);
+    return e ? e.userId : "";
 }
 exports.listMerchantEnrollments = enrollment_repo_1.listByMerchant;
 // [Task-213] C 端「我的免单」：列出当前联邦用户全部入渔记录。

@@ -56,10 +56,13 @@ exports.enrollmentRouter.post("/purchase", (0, auth_1.auth)(["USER"]), async (re
 });
 // [Task-213] 我的入渔列表（C 端「我的免单」）：须置于 GET /:id 之前，
 // 否则 /me 会被 :id 路由捕获为 id="me" 导致 404。
-// 20261017 退款: 30%前~70%内且无违规, 随时退, 扣所有奖励
-exports.enrollmentRouter.post("/:id/refund", (0, auth_1.auth)(["USER"]), async (req, res, next) => {
+// 20261017 退款: 30%前~70%内且无违规, 随时退, 扣所有奖励。
+// 通道(PO): balance=退到余额(即时); original=微信原路退(支付接入后执行)。运营后台(OPERATOR)可选通道代退。
+exports.enrollmentRouter.post("/:id/refund", (0, auth_1.auth)(["USER", "OPERATOR"]), async (req, res, next) => {
     try {
-        const r = await svc.refundEnrollment(req.user.userId, req.params.id);
+        const channel = req.body?.channel === "original" ? "original" : "balance";
+        const byOperator = req.user.role === "OPERATOR" && req.user.userId !== (await svc.getEnrollmentUserId(req.params.id));
+        const r = await svc.refundEnrollment(req.user.userId, req.params.id, { channel, byOperator });
         (0, http_1.ok)(res, r);
     }
     catch (e2) {
