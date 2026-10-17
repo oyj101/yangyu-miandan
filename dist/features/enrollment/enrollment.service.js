@@ -38,6 +38,7 @@ exports.purchase = purchase;
 exports.getEnrollment = getEnrollment;
 exports.refundEnrollment = refundEnrollment;
 exports.getEnrollmentUserId = getEnrollmentUserId;
+exports.syncPayStatus = syncPayStatus;
 exports.listUserEnrollments = listUserEnrollments;
 const errors_1 = require("../../lib/errors");
 const enrollment_repo_1 = require("./enrollment.repo");
@@ -101,6 +102,29 @@ async function getEnrollment(id) {
         throw (0, errors_1.notFound)("入渔记录不存在");
     return e;
 }
+/** 20261018 P0-1 资金闸门辅助: 本地非 paid 且有支付单号时, 向 8100 统一支付真源查单复核
+ * (回调可能未回写本地, 避免"已付款却被判无实付")。查单失败返回原状态, 由调用方据此拒绝。
+ * 只读优先 + 幂等回写 paid, 与核销侧 syncPayStatus 语义一致。 */
+async function recheckPayStatus(e) {
+    const st = String(e.payStatus || "none");
+    if (st !== "unpaid" || !e.payOrderNo)
+        return st;
+    try {
+        const cfg = await Promise.resolve().then(() => __importStar(require("../../config")));
+        const resp = await fetch(`${cfg.config.wallet.base}/yangyu/pay/status?order_no=${encodeURIComponent(String(e.payOrderNo))}`, { headers: { "X-Service-Key": cfg.config.wallet.serviceKey } });
+        if (!resp.ok)
+            return st;
+        const j = await resp.json().catch(() => null);
+        if (j?.data && String(j.data.status) === "paid") {
+            await (0, db_1.query)("UPDATE enrollment SET pay_status='paid' WHERE id=?", [e.id]);
+            return "paid";
+        }
+    }
+    catch (err) {
+        console.error("[refund] pay status recheck failed", { enrollmentId: e.id, err: err?.message });
+    }
+    return st;
+}
 /** 20261017 PO: 退款通道可选 —— balance=退到钱包余额(即时); original=微信原路退(支付接入后执行, 先落 pending 单据)。
  * 运营后台(OPERATOR)可选通道并代退任意入渔; 用户自助退默认 balance。 */
 async function refundEnrollment(userId, enrollmentId, opts = {}) {
@@ -117,6 +141,14 @@ async function refundEnrollment(userId, enrollmentId, opts = {}) {
         throw (0, errors_1.badRequest)("进度已达70%, 不可退款(完成转介绍可领最后30%)");
     if (Number(e.totalMissCount) > 0)
         throw (0, errors_1.badRequest)("存在养鱼未达标记录, 不符合退款条件");
+    // 20261018 P0-1 资金安全闸门: 仅"已实付(paid)"入渔才产生真实退款资金。
+    // 免费领卡(none)/已下单未付(unpaid)均无实付, 走退款即凭空造钱
+    // (历史实证: 流水 2519 对 pay_status=none 入渔 +100 发放, 靠人工 -100 对冲)。
+    // unpaid 先向统一支付真源查单复核一次, 仍非 paid 才拒。
+    const payStatus = await recheckPayStatus(e);
+    if (payStatus !== "paid") {
+        throw (0, errors_1.badRequest)("该入渔无实付记录, 不涉及资金退回(免费领卡或未完成支付不可退款)");
+    }
     const card = await (0, card_repo_1.findCardById)(e.cardId);
     if (!card)
         throw (0, errors_1.notFound)("免单卡不存在");
@@ -176,6 +208,30 @@ async function refundEnrollment(userId, enrollmentId, opts = {}) {
 async function getEnrollmentUserId(enrollmentId) {
     const e = await (0, enrollment_repo_1.findEnrollment)(enrollmentId);
     return e ? e.userId : "";
+}
+/** 20261017 支付状态同步: unpaid 时向 8100 统一支付真源查单; 已付则本地置 paid(打通回调→入渔可用链路)。
+ * 幂等; 查单失败或仍未付返回原状态(调用方据此拒绝核销)。 */
+async function syncPayStatus(enrollmentId) {
+    const e = await (0, enrollment_repo_1.findEnrollment)(enrollmentId);
+    if (!e)
+        return "none";
+    if (!e.payOrderNo || e.payStatus === "paid" || e.payStatus === "none")
+        return e.payStatus || "none";
+    try {
+        const cfg = await Promise.resolve().then(() => __importStar(require("../../config")));
+        const resp = await fetch(`${cfg.config.wallet.base}/yangyu/pay/status?order_no=${encodeURIComponent(e.payOrderNo)}`, { headers: { "X-Service-Key": cfg.config.wallet.serviceKey } });
+        if (!resp.ok)
+            return e.payStatus || "none";
+        const j = await resp.json().catch(() => null);
+        if (j?.data && String(j.data.status) === "paid") {
+            await (0, db_1.query)("UPDATE enrollment SET pay_status='paid' WHERE id=?", [enrollmentId]);
+            return "paid";
+        }
+    }
+    catch (err) {
+        console.error("[pay] sync failed", { enrollmentId, err: err?.message });
+    }
+    return e.payStatus || "none";
 }
 exports.listMerchantEnrollments = enrollment_repo_1.listByMerchant;
 // [Task-213] C 端「我的免单」：列出当前联邦用户全部入渔记录。

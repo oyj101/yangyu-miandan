@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.computeOnCheckin = computeOnCheckin;
 exports.issueIntroBonus = issueIntroBonus;
@@ -21,9 +54,12 @@ async function computeOnCheckin(enrollmentId, merchantId) {
         throw (0, errors_1.notFound)("入渔记录不存在");
     if (e.merchantId !== merchantId)
         throw (0, errors_1.notFound)("入渔记录不属于该商家");
-    // 20261017 付费模式: 下单未支付的入渔不允许核销(防逃单)。免费领卡模式 pay_status=none, 不受影响。
+    // 20261017 付费模式: 未支付不允许核销(防逃单)。核销前先向真源查单同步(回调可能未回写本地), 仍 unpaid 才拒。
     if (e.pay_status === "unpaid" || e.payStatus === "unpaid") {
-        throw (0, errors_1.conflict)("该入渔尚未完成支付，请先支付后再核销");
+        const svcMod = await Promise.resolve().then(() => __importStar(require("../enrollment/enrollment.service")));
+        const st = await svcMod.syncPayStatus(enrollmentId);
+        if (st === "unpaid")
+            throw (0, errors_1.conflict)("该入渔尚未完成支付，请先支付后再核销");
     }
     const card = await (0, card_repo_1.findCardById)(e.cardId);
     if (!card)

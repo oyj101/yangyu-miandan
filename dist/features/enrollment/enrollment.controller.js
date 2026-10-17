@@ -38,6 +38,7 @@ const express_1 = require("express");
 const zod_1 = require("zod");
 const auth_1 = require("../../middleware/auth");
 const http_1 = require("../../lib/http");
+const errors_1 = require("../../lib/errors");
 const svc = __importStar(require("./enrollment.service"));
 const purchaseSchema = zod_1.z.object({ cardId: zod_1.z.string().min(1), pay: zod_1.z.boolean().optional(), channel: zod_1.z.string().optional(), openid: zod_1.z.string().optional() });
 exports.enrollmentRouter = (0, express_1.Router)();
@@ -70,6 +71,16 @@ exports.enrollmentRouter.post("/:id/refund", (0, auth_1.auth)(["USER", "OPERATOR
         next(e2);
     }
 });
+// 20261017 支付完成后由前端调用: 向统一支付真源查单并同步本地(也可由核销前自动同步兜底)
+exports.enrollmentRouter.post("/:id/pay-sync", (0, auth_1.auth)(["USER", "OPERATOR"]), async (req, res, next) => {
+    try {
+        const st = await svc.syncPayStatus(req.params.id);
+        (0, http_1.ok)(res, { payStatus: st });
+    }
+    catch (e2) {
+        next(e2);
+    }
+});
 exports.enrollmentRouter.get("/me", (0, auth_1.auth)(["USER", "MERCHANT", "OPERATOR", "CASHIER"]), async (req, res, next) => {
     try {
         const list = await svc.listUserEnrollments(req.user.userId);
@@ -82,6 +93,15 @@ exports.enrollmentRouter.get("/me", (0, auth_1.auth)(["USER", "MERCHANT", "OPERA
 exports.enrollmentRouter.get("/:id", (0, auth_1.auth)(["USER", "MERCHANT", "OPERATOR", "CASHIER"]), async (req, res, next) => {
     try {
         const e = await svc.getEnrollment(req.params.id);
+        // 20261018 P0-2 水平越权防护: 仅本人 / 归属商户(含该商户收银员) / 运营 可查看详情
+        const u = req.user;
+        const isOwner = e.userId === u.userId;
+        const isStaffOfIt = !!u.merchantId &&
+            e.merchantId === u.merchantId &&
+            (u.role === "MERCHANT" || u.role === "CASHIER");
+        const isOperator = u.role === "OPERATOR";
+        if (!isOwner && !isStaffOfIt && !isOperator)
+            throw (0, errors_1.forbidden)("无权查看该入渔记录");
         (0, http_1.ok)(res, e);
     }
     catch (e2) {
@@ -91,6 +111,14 @@ exports.enrollmentRouter.get("/:id", (0, auth_1.auth)(["USER", "MERCHANT", "OPER
 // F7 任务名单集合页（商户侧）
 exports.enrollmentRouter.get("/merchant/:merchantId", (0, auth_1.auth)(["MERCHANT", "OPERATOR", "CASHIER"]), async (req, res, next) => {
     try {
+        // 20261018 P0-2 水平越权防护: 商户/收银员仅可查本商户名单(含 userId/发放金额), 运营不限
+        const u = req.user;
+        const isStaffOfIt = !!u.merchantId &&
+            u.merchantId === req.params.merchantId &&
+            (u.role === "MERCHANT" || u.role === "CASHIER");
+        const isOperator = u.role === "OPERATOR";
+        if (!isStaffOfIt && !isOperator)
+            throw (0, errors_1.forbidden)("无权查看该商户的入渔名单");
         const statusFilter = req.query.status;
         const list = await svc.listMerchantEnrollments(req.params.merchantId, statusFilter);
         (0, http_1.ok)(res, list);
