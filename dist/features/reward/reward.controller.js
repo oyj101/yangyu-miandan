@@ -22,6 +22,17 @@ exports.rewardRouter.post("/evaluate", (0, auth_1.auth)(["OPERATOR"]), async (re
         next(e);
     }
 });
+// 20261018 P1-2: 批量周评估(定时任务/运营触发)。幂等: 同入渔同周只评估一次;
+// 养鱼数据不可用的入渔跳过(不惩罚, 下次重试)。
+exports.rewardRouter.post("/evaluate-all", (0, auth_1.auth)(["OPERATOR"]), async (_req, res, next) => {
+    try {
+        const r = await (0, reward_service_1.evaluateAllWeekly)();
+        (0, http_1.ok)(res, r);
+    }
+    catch (e) {
+        next(e);
+    }
+});
 exports.rewardRouter.get("/:enrollmentId", (0, auth_1.auth)(["USER", "MERCHANT", "OPERATOR"]), async (req, res, next) => {
     try {
         const list = await (0, reward_service_1.listRewards)(req.params.enrollmentId);

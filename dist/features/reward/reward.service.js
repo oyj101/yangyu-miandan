@@ -37,7 +37,9 @@ exports.computeOnCheckin = computeOnCheckin;
 exports.issueIntroBonus = issueIntroBonus;
 exports.triggerIntroBonus = triggerIntroBonus;
 exports.evaluateWeek = evaluateWeek;
+exports.evaluateAllWeekly = evaluateAllWeekly;
 exports.listRewards = listRewards;
+exports.currentWeek = currentWeek;
 const db_1 = require("../../lib/db");
 const errors_1 = require("../../lib/errors");
 const config_1 = require("../../config");
@@ -54,6 +56,11 @@ async function computeOnCheckin(enrollmentId, merchantId) {
         throw (0, errors_1.notFound)("入渔记录不存在");
     if (e.merchantId !== merchantId)
         throw (0, errors_1.notFound)("入渔记录不属于该商家");
+    // 20261018 P1-3: 已退款/已退出的入渔不得再核销(此前只挡住了发奖, 核销记录与 pauseRemaining 仍被写入, 污染名单与统计)。
+    // normal 与停奖态(pause1/pause3)可正常核销 —— 停奖期核销用于消耗 pauseRemaining。
+    if (e.status !== "normal" && e.status !== "pause1" && e.status !== "pause3") {
+        throw (0, errors_1.conflict)(`该入渔当前状态(${e.status})不可核销`);
+    }
     // 20261017 付费模式: 未支付不允许核销(防逃单)。核销前先向真源查单同步(回调可能未回写本地), 仍 unpaid 才拒。
     if (e.pay_status === "unpaid" || e.payStatus === "unpaid") {
         const svcMod = await Promise.resolve().then(() => __importStar(require("../enrollment/enrollment.service")));
@@ -291,6 +298,43 @@ async function evaluateWeek(enrollmentId, met) {
     await (0, enrollment_repo_1.updateEnrollState)(db_1.pool, e.id, next);
     return next;
 }
+/**
+ * 20261018 P1-2: 批量周评估(原 evaluateWeekly 唯一入口是 OPERATOR 手动单条端点, 惩罚阶梯形同虚设)。
+ * 达标真源与核销发奖同源(8100 feed-days >= 阈值), 保证"发奖"与"惩罚"口径一致。
+ * 幂等: weekly_eval_log 唯一键 (enrollment_id, week) 保证同一入渔同一周只评估一次。
+ * 保守: 养鱼数据不可用时跳过(不评估、不记日志), 避免误罚 —— 下次调度可重试。
+ */
+async function evaluateAllWeekly() {
+    const week = currentWeek();
+    const list = await (0, db_1.query)(`SELECT id, user_id FROM enrollment WHERE status IN ('normal','pause1','pause3')`);
+    let evaluated = 0, met = 0, missed = 0, skipped = 0;
+    for (const r of list.rows) {
+        const feed = await fetchFeedDays(r.user_id);
+        if (!feed.ok) {
+            skipped++;
+            continue;
+        } // 数据不可用: 不评估不惩罚, 下次重试
+        const isMet = feed.days >= feed.threshold;
+        try {
+            await (0, db_1.query)(`INSERT INTO weekly_eval_log (id, enrollment_id, week, met, days, threshold)
+         VALUES (?,?,?,?,?,?)`, [(0, db_1.newId)(), r.id, week, isMet, feed.days, feed.threshold]);
+        }
+        catch (err) {
+            if (err?.errno === 1062 || err?.code === "ER_DUP_ENTRY") {
+                skipped++;
+                continue;
+            }
+            throw err;
+        }
+        await evaluateWeek(r.id, isMet);
+        evaluated++;
+        if (isMet)
+            met++;
+        else
+            missed++;
+    }
+    return { week, evaluated, met, missed, skipped };
+}
 async function listRewards(enrollmentId) {
     const res = await (0, db_1.query)(`SELECT * FROM reward WHERE enrollment_id = ? ORDER BY created_at DESC`, [enrollmentId]);
     return res.rows.map((r) => ({
@@ -300,12 +344,22 @@ async function listRewards(enrollmentId) {
         createdAt: r.created_at,
     }));
 }
+/**
+ * 20261018 P1-1 修正: 旧算法以「年内第 N 个 7 天」编号, 与 ISO 周系统性偏移,
+ * 且在跨年周/周内翻周处会把同一自然周割裂成两个 week 值
+ * → idx_checkin_dedup(enrollment_id, week) 失效(同周可核销两次)。
+ * 现改为标准 ISO-8601 周(周四归属法: 本周周四所在年份即 ISO 年, 周一为一周之始),
+ * 格式保持 YYYYWnn 不变, 一周恒定 7 天、跨年不再割裂。
+ */
 function currentWeek() {
-    // UTC+8 自然周编号（YYYYWW）
+    // UTC+8 业务日
     const now = new Date(Date.now() + 8 * 3600 * 1000);
-    const y = now.getUTCFullYear();
-    const start = new Date(Date.UTC(y, 0, 1));
-    const week = Math.ceil(((now.getTime() - start.getTime()) / 86400000 + start.getUTCDay()) / 7);
-    return `${y}W${week}`;
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const day = d.getUTCDay() || 7; // 周一=1 ... 周日=7
+    d.setUTCDate(d.getUTCDate() + 4 - day); // 移到本周周四 → 决定 ISO 年
+    const isoYear = d.getUTCFullYear();
+    const yearStart = new Date(Date.UTC(isoYear, 0, 1));
+    const week = Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+    return `${isoYear}W${week}`;
 }
 //# sourceMappingURL=reward.service.js.map
