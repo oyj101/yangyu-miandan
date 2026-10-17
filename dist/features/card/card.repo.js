@@ -7,11 +7,13 @@ exports.setCardStatus = setCardStatus;
 exports.listByMerchant = listByMerchant;
 exports.listPending = listPending;
 exports.listPublic = listPublic;
+exports.listFederationRows = listFederationRows;
 const db_1 = require("../../lib/db");
 function mapRow(r) {
     return {
         id: r.id,
         merchantId: r.merchant_id,
+        merchantName: r.merchant_name || null,
         type: r.type,
         times: r.times,
         freq: r.freq,
@@ -30,10 +32,11 @@ function mapRow(r) {
 // 不用 INSERT..RETURNING：mysql2 对该语法结果集回传无保证，跨版本行为不稳。
 async function insertCard(input) {
     const id = (0, db_1.newId)();
-    await (0, db_1.query)(`INSERT INTO card (id, merchant_id, type, times, freq, reward_per_time, price, coverage, coverage_cap, per_merchant_quota)
-     VALUES (?,?,?,?,?,?,?,?,?,?)`, [
+    await (0, db_1.query)(`INSERT INTO card (id, merchant_id, merchant_name, type, times, freq, reward_per_time, price, coverage, coverage_cap, per_merchant_quota)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?)`, [
         id,
         input.merchantId,
+        input.merchantName || null,
         input.type,
         input.times,
         input.freq,
@@ -83,5 +86,25 @@ async function listPending() {
 async function listPublic() {
     const res = await (0, db_1.query)(`SELECT * FROM card WHERE status = 'active' ORDER BY created_at DESC`);
     return res.rows.map(mapRow);
+}
+/* ---------- FEDERATION_API · 跨商户聚合查询 ---------- */
+async function listFederationRows(status, q) {
+    const where = [];
+    const params = [];
+    if (status && status !== "all") {
+        where.push("c.status = ?");
+        params.push(status);
+    }
+    if (q) {
+        where.push("(c.merchant_name LIKE ? OR c.type LIKE ? OR c.merchant_id LIKE ?)");
+        const like = `%${q}%`;
+        params.push(like, like, like);
+    }
+    const sql = `SELECT c.*, (SELECT COUNT(*) FROM enrollment e WHERE e.card_id = c.id) AS enrolled_count ` +
+        `FROM card c ` +
+        (where.length ? `WHERE ${where.join(" AND ")} ` : "") +
+        `ORDER BY c.created_at DESC`;
+    const res = await (0, db_1.query)(sql, params);
+    return res.rows;
 }
 //# sourceMappingURL=card.repo.js.map

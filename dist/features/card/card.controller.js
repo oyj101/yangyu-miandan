@@ -41,6 +41,7 @@ const http_1 = require("../../lib/http");
 const svc = __importStar(require("./card.service"));
 const createSchema = zod_1.z.object({
     merchantId: zod_1.z.string().min(1),
+    merchantName: zod_1.z.string().max(64).optional(),
     type: zod_1.z.enum(["year", "times"]),
     times: zod_1.z.number().int().positive(),
     freq: zod_1.z.string().min(1),
@@ -110,6 +111,19 @@ exports.cardRouter.put("/params/:key", (0, auth_1.auth)(["OPERATOR"]), async (re
         const value = zod_1.z.number().parse(req.body.value);
         const param = await svc.setGlobalParam(req.params.key, value, req.user.userId);
         (0, http_1.ok)(res, param);
+    }
+    catch (e) {
+        next(e);
+    }
+});
+// FEDERATION_API · 联邦消费项目集合（公开，游客可访问）：跨商户聚合。
+// GET /api/cards/federation?status=active|pending|offline|all&q=关键词
+exports.cardRouter.get("/federation", async (req, res, next) => {
+    try {
+        const status = String(req.query.status || "active");
+        const q = String(req.query.q || "").trim();
+        const data = await svc.listFederation(status, q);
+        (0, http_1.ok)(res, data);
     }
     catch (e) {
         next(e);

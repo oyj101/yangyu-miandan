@@ -6,6 +6,7 @@ exports.review = review;
 exports.listPublicCards = listPublicCards;
 exports.getGlobalParams = getGlobalParams;
 exports.setGlobalParam = setGlobalParam;
+exports.listFederation = listFederation;
 const config_1 = require("../../config");
 const errors_1 = require("../../lib/errors");
 const card_repo_1 = require("./card.repo");
@@ -30,6 +31,7 @@ async function createApplication(input) {
     }
     return (0, card_repo_1.insertCard)({
         merchantId: input.merchantId,
+        merchantName: input.merchantName,
         type: input.type,
         times: input.times,
         freq: input.freq,
@@ -79,6 +81,55 @@ async function setGlobalParam(key, value, operator) {
         value: Number(r.value),
         operator: r.operator,
         updatedAt: r.updated_at,
+    };
+}
+/* ---------- FEDERATION_API · 联邦消费项目集合（跨商户分组） ---------- */
+async function listFederation(status, q) {
+    const allowed = ["active", "pending", "offline", "all"];
+    const st = allowed.includes(status) ? status : "active";
+    const rows = await (0, card_repo_1.listFederationRows)(st, (q || "").trim());
+    const groupsMap = new Map();
+    let activeCards = 0;
+    let totalEnrollments = 0;
+    for (const r of rows) {
+        const mid = String(r.merchant_id);
+        let g = groupsMap.get(mid);
+        if (!g) {
+            g = {
+                merchantId: mid,
+                merchantName: r.merchant_name || mid,
+                certified: false, // 认证源未接入（主平台商户认证态），先恒 false
+                cards: [],
+            };
+            groupsMap.set(mid, g);
+        }
+        const enrolledCount = Number(r.enrolled_count) || 0;
+        totalEnrollments += enrolledCount;
+        if (r.status === "active")
+            activeCards += 1;
+        g.cards.push({
+            id: r.id,
+            type: r.type,
+            times: Number(r.times) || 0,
+            freq: r.freq,
+            rewardPerTime: Number(r.reward_per_time) || 0,
+            price: Number(r.price) || 0,
+            coverage: Number(r.coverage) || 0,
+            coverageCap: Number(r.coverage_cap) || 0,
+            perMerchantQuota: Number(r.per_merchant_quota) || 0,
+            status: r.status,
+            enrolledCount,
+            createdAt: r.created_at,
+        });
+    }
+    const groups = Array.from(groupsMap.values());
+    return {
+        summary: {
+            merchants: groups.length,
+            activeCards,
+            totalEnrollments,
+        },
+        groups,
     };
 }
 //# sourceMappingURL=card.service.js.map
