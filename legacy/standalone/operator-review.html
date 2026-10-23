@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>养鱼免单 · 运营审核台</title>
+  <link rel="stylesheet" href="./assets/fed-tokens.css" />
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">同城智慧商业联邦 <small>· 运营审核台</small></div>
+    <span class="muted" style="margin-left:auto" id="who"></span>
+  </div>
+  <div class="container" id="app"></div>
+  <div class="toast"></div>
+
+  <script type="module">
+    import { api, toast } from "./assets/api.js";
+    document.getElementById("who").textContent = "运营角色";
+    try { await api.login("operator_01", "OPERATOR"); } catch (e) { toast("登录失败：" + e.message); }
+    const app = document.getElementById("app");
+
+    async function boot() {
+      let cards = [];
+      try { cards = await api.listPending(); } catch (e) { toast(e.message); }
+      const rows = cards.map(c => `
+        <tr>
+          <td>${c.merchantId}</td><td>${c.type === "year" ? "年卡" : "次卡"}</td>
+          <td>${c.times}次 / ${c.freq}</td>
+          <td>¥${c.price}</td><td>¥${c.rewardPerTime}/次</td>
+          <td><span class="pill pending">pending</span></td>
+          <td>
+            <button class="btn" onclick="window.__approve('${c.id}')">通过</button>
+            <button class="btn ghost" onclick="window.__reject('${c.id}')">驳回</button>
+          </td>
+        </tr>`).join("");
+      app.innerHTML = `
+        <div class="card"><h2>待审核免单卡</h2>
+          <table><thead><tr><th>商家</th><th>类型</th><th>约定</th><th>售价</th><th>奖励</th><th>状态</th><th>操作</th></tr></thead>
+          <tbody>${rows || '<tr><td colspan="7" class="muted">暂无待审核</td></tr>'}</tbody></table></div>`;
+      try {
+        const params = await api.getParams();
+        app.insertAdjacentHTML("beforeend", `
+          <div class="card"><h2>全局奖励参数</h2>
+            ${params.map(p => `<p>${p.key} = <b>${p.value}</b></p>`).join("")}
+            <div class="row">
+              <div><label>调整 coverage_cap</label><input id="cap" type="number" step="0.1" value="1.0" /></div>
+              <div><label>调整 per_merchant_quota</label><input id="quota" type="number" value="200" /></div>
+            </div>
+            <button class="btn" onclick="window.__setParams()">保存参数</button>
+          </div>`);
+      } catch (e) {}
+    }
+
+    window.__approve = async (id) => {
+      try { await api.review(id, true); toast("已通过上架"); boot(); }
+      catch (e) { toast(e.message); }
+    };
+    window.__reject = async (id) => {
+      const reason = prompt("驳回理由");
+      if (!reason) return;
+      try { await api.review(id, false, reason); toast("已驳回"); boot(); }
+      catch (e) { toast(e.message); }
+    };
+    window.__setParams = async () => {
+      try {
+        const cap = +document.getElementById("cap").value;
+        const quota = +document.getElementById("quota").value;
+        await fetch("/api/cards/params/coverage_cap", { method: "PUT", headers: { "Content-Type": "application/json", Authorization: "Bearer " + sessionStorage.getItem("yy_access") }, body: JSON.stringify({ value: cap }) });
+        await fetch("/api/cards/params/per_merchant_quota", { method: "PUT", headers: { "Content-Type": "application/json", Authorization: "Bearer " + sessionStorage.getItem("yy_access") }, body: JSON.stringify({ value: quota }) });
+        toast("参数已保存"); boot();
+      } catch (e) { toast(e.message); }
+    };
+
+    boot();
+  </script>
+</body>
+</html>

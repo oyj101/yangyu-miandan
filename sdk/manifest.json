@@ -1,0 +1,81 @@
+{
+  "name": "octo-yangyu",
+  "version": "2.1.0",
+  "kind": "inline-module",
+  "namespace": "Octo.Yangyu",
+  "entry": "octo-yangyu.v2.0.0.js",
+  "contract": "2.0",
+  "requires": {
+    "core": false,
+    "note": "不依赖 octo-core：身份走 domain=.ws.hi.cn cookie，路径走同源反代；core 的 baseUrl(/api/v2) 会污染 /yangyu-api 绝对路径"
+  },
+  "provides": {
+    "views": ["projects", "mine", "checkin", "merchant", "ops", "notices"],
+    "api": [
+      "bootstrap", "meta", "getProjects", "getProject", "purchase", "getMine",
+      "getNotices", "readNotice", "checkin", "getMerchantConsole", "getOpsConsole",
+      "designCard", "reviewCard", "extendPeriod",
+      "getShareLink", "bindShare", "autoBind", "refreshShare", "getShareChain", "openShare",
+      "mount", "configure", "track", "raw"
+    ]
+  },
+  "behavior": {
+    "projects_list": "集合页不返回单价与返还比例，只给 totalPrice/periods 与定性文案 refundClaim（PO 2026-10-21）",
+    "share_entry": "分享入口只在 mine 视图（持卡人），任何卡都可分享，不要求已成交；集合页不放，避免在转化位分流",
+    "share_relation": "谁分享绑定谁：链接带分享者 ai_uid，被分享者打开即 bind（POST /api/sdk/share/bind）。绑定即解锁分享者**名下全部卡**，比例逐卡取 card.share_ratio，不生成邀请码",
+    "share_bind_policy": "first（默认）首触锁定：一个被分享者只归一任分享者；last 为末触覆盖（多分享者各解锁一次，成本更高）",
+    "track": "事件落 sdk_event 表（服务端队列批量写入，失败丢弃不影响响应）"
+  },
+  "backend": {
+    "base": "/yangyu-api",
+    "bff": [
+      "GET /api/sdk/meta",
+      "GET /api/sdk/bootstrap",
+      "GET /api/sdk/projects",
+      "GET /api/sdk/projects/:id",
+      "POST /api/sdk/projects/:id/purchase",
+      "GET /api/sdk/mine",
+      "GET /api/sdk/notices",
+      "POST /api/sdk/notices/:id/read",
+      "GET /api/sdk/share/link",
+      "POST /api/sdk/share/bind",
+      "POST /api/sdk/share/refresh",
+      "GET /api/sdk/share/chain",
+      "GET /api/sdk/merchant/console",
+      "GET /api/sdk/ops/console",
+      "POST /api/sdk/ops/share-sweep",
+      "POST /api/sdk/ops/purge-events",
+      "POST /api/sdk/track"
+    ],
+    "atomic": [
+      "POST /api/checkin",
+      "POST /api/cards/design",
+      "POST /api/cards/:id/review",
+      "POST /api/periods/:id/extend",
+      "POST /api/enrollments/:id/refund"
+    ]
+  },
+  "hosts": [
+    { "site": "ai", "page": "养活计划入口页", "view": "projects", "audience": "C 端" },
+    { "site": "ai", "page": "我的-我的养鱼", "view": "mine", "audience": "C 端" },
+    { "site": "h6", "page": "商户后台-核销台", "view": "checkin", "audience": "商户/收银员" },
+    { "site": "h6", "page": "商户后台-结算", "view": "merchant", "audience": "商户" },
+    { "site": "ai", "page": "运营后台-养鱼", "view": "ops", "audience": "运营" }
+  ],
+  "switches": {
+    "note": "启用一个模块必须同时打开三处，少一处就是半启用（占位页会发请求或发请求却被后端拒）",
+    "1_frontend_nav": "站点 app.js nav[] 增加入口",
+    "2_frontend_live": "站点 app.js live[] 增加同一 id，否则渲染占位页不发请求",
+    "3_backend_allow": "后端 TENANT_ALLOW 放行该模块 id"
+  },
+  "distribution": {
+    "channel": "bash tools/deploy-sdk.sh <prev-tag> --site ai --apply",
+    "registry": "SHA256SUMS.sdk",
+    "cache_stamp": "宿主引用必须带 ?v=TOKvNN，改 SDK 必须 bump",
+    "forbidden": [
+      "手工 scp 覆盖 shared/octo-sdk/modules/",
+      "在仓内保留 .octo-law 副本",
+      "把本模块当独立站点部署（页面由宿主提供，SDK 不提供 index.html）"
+    ]
+  }
+}

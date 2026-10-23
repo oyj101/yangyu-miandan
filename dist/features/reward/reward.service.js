@@ -1,37 +1,4 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.computeOnCheckin = computeOnCheckin;
 exports.issueIntroBonus = issueIntroBonus;
@@ -39,13 +6,17 @@ exports.triggerIntroBonus = triggerIntroBonus;
 exports.evaluateWeek = evaluateWeek;
 exports.evaluateAllWeekly = evaluateAllWeekly;
 exports.listRewards = listRewards;
+exports.evaluateAllWeeklyV2 = evaluateAllWeeklyV2;
 exports.currentWeek = currentWeek;
 const db_1 = require("../../lib/db");
 const errors_1 = require("../../lib/errors");
 const config_1 = require("../../config");
+const logger_1 = require("../../lib/logger");
+const fund_1 = require("../../lib/fund");
 const engine_1 = require("./engine");
 const enrollment_repo_1 = require("../enrollment/enrollment.repo");
 const card_repo_1 = require("../card/card.repo");
+const iso_week_1 = require("../period/iso-week");
 /**
  * F5/F6：核销履约时计算奖励。受 4.3 状态机 + 免单上限(coverage_cap) 双重约束。
  * 资金结算：奖励以「鱼豆(coin)」经主平台 wallet_service 动账，不裸写资金表。
@@ -61,12 +32,9 @@ async function computeOnCheckin(enrollmentId, merchantId) {
     if (e.status !== "normal" && e.status !== "pause1" && e.status !== "pause3") {
         throw (0, errors_1.conflict)(`该入渔当前状态(${e.status})不可核销`);
     }
-    // 20261017 付费模式: 未支付不允许核销(防逃单)。核销前先向真源查单同步(回调可能未回写本地), 仍 unpaid 才拒。
+    // 20261017 付费模式: 下单未支付的入渔不允许核销(防逃单)。免费领卡模式 pay_status=none, 不受影响。
     if (e.pay_status === "unpaid" || e.payStatus === "unpaid") {
-        const svcMod = await Promise.resolve().then(() => __importStar(require("../enrollment/enrollment.service")));
-        const st = await svcMod.syncPayStatus(enrollmentId);
-        if (st === "unpaid")
-            throw (0, errors_1.conflict)("该入渔尚未完成支付，请先支付后再核销");
+        throw (0, errors_1.conflict)("该入渔尚未完成支付，请先支付后再核销");
     }
     const card = await (0, card_repo_1.findCardById)(e.cardId);
     if (!card)
@@ -156,29 +124,20 @@ async function issueIntroBonus(enrollmentId, introAmount, remark) {
     });
     // 即时余额动账(与核销发奖同通道; 失败仅日志, 奖励记录已落库可对账)
     try {
-        const mu = await (0, db_1.query)("SELECT ai_uid FROM merchant_user WHERE user_id = ? LIMIT 1", [e.userId]);
-        const aiUid = mu.rows[0]?.ai_uid;
-        if (aiUid) {
-            const resp = await fetch(`${config_1.config.wallet.base}/wallet/change`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json", "X-Service-Key": config_1.config.wallet.serviceKey },
-                body: JSON.stringify({
-                    uid: Number(aiUid), asset: "balance", amount: Number(amount),
-                    biz_type: "yangyu:reward", ledger: "zy",
-                    remark: `${remark} 转介绍30% 入渔 ${enrollmentId} 奖励 ${rewardId}`, biz_id: 0,
-                }),
-            });
-            const j = await resp.json().catch(() => ({}));
-            if (j && (j.code === 0 || j.code === "0") && j.data && j.data.ok) {
-                console.info("[reward] 转介绍30%余额动账成功", { aiUid, amount, flowNo: j.data.flow_no });
-            }
-            else {
-                console.error("[reward] INTRO_CREDIT_FAILED", { userId: e.userId, amount, resp: j });
-            }
+        const r = await (0, fund_1.walletChangeOfUser)(e.userId, {
+            amount,
+            bizType: "yangyu:reward",
+            remark: `${remark} 转介绍30% 入渔 ${enrollmentId} 奖励 ${rewardId}`,
+        });
+        if (r.ok) {
+            logger_1.logger.info({ aiUid: r.aiUid, amount, flowNo: r.flowNo }, "转介绍30%余额动账成功");
+        }
+        else {
+            (0, fund_1.logFundFailure)("reward.intro_bonus", { refType: "enrollment", refId: enrollmentId, userId: e.userId }, r);
         }
     }
     catch (err) {
-        console.error("[reward] INTRO_CREDIT_ERROR", { enrollmentId, err: err?.message });
+        logger_1.logger.error({ enrollmentId, err: err?.message }, "INTRO_CREDIT_ERROR");
     }
     return true;
 }
@@ -190,8 +149,7 @@ async function triggerIntroBonus(buyerUserId, cardId) {
         if (!card0)
             return;
         const cardPrice = Number(card0.price);
-        const mu = await (0, db_1.query)("SELECT ai_uid FROM merchant_user WHERE user_id = ? LIMIT 1", [buyerUserId]);
-        const aiUid = mu.rows[0]?.ai_uid;
+        const aiUid = await (0, fund_1.resolveAiUid)(buyerUserId);
         if (!aiUid)
             return;
         const r = await fetch(`${config_1.config.wallet.base}/yangyu/referrer?uid=${Number(aiUid)}`, { headers: { "X-Service-Key": config_1.config.wallet.serviceKey } });
@@ -226,8 +184,7 @@ async function triggerIntroBonus(buyerUserId, cardId) {
 async function fetchFeedDays(userId) {
     const fallback = { ok: false, days: 0, threshold: 5 };
     try {
-        const mu = await (0, db_1.query)("SELECT ai_uid FROM merchant_user WHERE user_id = ? LIMIT 1", [userId]);
-        const aiUid = mu.rows[0]?.ai_uid;
+        const aiUid = await (0, fund_1.resolveAiUid)(userId);
         if (!aiUid)
             return fallback;
         const resp = await fetch(`${config_1.config.wallet.base}/yangyu/feed-days?uid=${Number(aiUid)}`, { headers: { "X-Service-Key": config_1.config.wallet.serviceKey } });
@@ -250,41 +207,20 @@ async function fetchFeedDays(userId) {
  * 服务间鉴权：X-Service-Key == settings.wallet_service_key。资产 coin=鱼豆。
  */
 async function creditFishBeans(userId, amount, enrollmentId, rewardId) {
-    const key = config_1.config.wallet.serviceKey;
-    if (!key) {
-        console.warn("[reward] WALLET_SERVICE_KEY 未配置，跳过余额动账", { userId, amount });
-        return;
+    // 核销发奖的资金面：奖励记录已在事务里以 issued 落库，这里失败不能回滚那条记录
+    // （核销已完成，退回等于允许用户白拿），只能留结构化失败日志供对账补偿。
+    // 但「失败」必须带上 code 与 aiUid —— 旧实现只 console.error 一句话，
+    // 对账时分不清是配置缺失、未联邦，还是上游拒单。
+    const r = await (0, fund_1.walletChangeOfUser)(userId, {
+        amount,
+        bizType: "yangyu:reward",
+        remark: `养鱼免单奖励(余额) 入渔 ${enrollmentId} 奖励 ${rewardId}`,
+    });
+    if (r.ok) {
+        logger_1.logger.info({ aiUid: r.aiUid, amount, flowNo: r.flowNo }, "核销奖励余额动账成功");
     }
-    try {
-        const mu = await (0, db_1.query)("SELECT ai_uid FROM merchant_user WHERE user_id = ? LIMIT 1", [userId]);
-        const aiUid = mu.rows[0]?.ai_uid;
-        if (!aiUid) {
-            console.warn("[reward] 未找到 ai_uid，跳过鱼豆动账", { userId });
-            return;
-        }
-        const resp = await fetch(`${config_1.config.wallet.base}/wallet/change`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "X-Service-Key": key },
-            body: JSON.stringify({
-                uid: Number(aiUid),
-                asset: "balance",
-                amount: Number(amount),
-                biz_type: "yangyu:reward",
-                ledger: "zy",
-                remark: `养鱼免单奖励(余额) 入渔 ${enrollmentId} 奖励 ${rewardId}`,
-                biz_id: 0,
-            }),
-        });
-        const j = await resp.json().catch(() => ({}));
-        if (!(j && (j.code === 0 || j.code === "0") && j.data && j.data.ok)) {
-            console.error("[reward] BALANCE_CREDIT_FAILED", { userId, aiUid, amount, resp: j });
-        }
-        else {
-            console.info("[reward] 余额动账成功", { aiUid, amount, flowNo: j.data.flow_no });
-        }
-    }
-    catch (err) {
-        console.error("[reward] WALLET_CREDIT_ERROR", { userId, amount, err: err?.message });
+    else {
+        (0, fund_1.logFundFailure)("reward.checkin_credit", { refType: "reward", refId: rewardId, userId }, r);
     }
 }
 /**
@@ -343,6 +279,63 @@ async function listRewards(enrollmentId) {
         status: r.status,
         createdAt: r.created_at,
     }));
+}
+/**
+ * v2 周评估（套餐卡）：评估对象是「上一 ISO 周」。
+ *
+ * 为什么必须是上一周而不是本周：连续 5 天的合法起点只有周一/二/三，
+ * 用户最典型的形态是「周三→周日」，第 5 天正好是周日。
+ * 若在周日 23:50 评估，23:55 才做的投喂根本还没落库，
+ * 最容易达标的人反而被判未达标 —— 这是旧调度最危险的地方。
+ *
+ * 判据（与核销口径一致，不重复拉数据）：
+ *   period.checkin_id IS NULL              → 未完成，met=false（正常惩罚）
+ *   checkin_id 非空 且 data_available=0     → 数据不可用，跳过（不惩罚，下次可重试）
+ *   checkin_id 非空 且 data_available=1     → met = period.task_met
+ */
+async function evaluateAllWeeklyV2(now = new Date()) {
+    const target = (0, iso_week_1.shiftWeek)((0, iso_week_1.isoWeekOf)(now), -1);
+    const week = (0, iso_week_1.isoWeekKey)(target);
+    const windowStart = (0, iso_week_1.ymd)(target.monday);
+    const windowEnd = (0, iso_week_1.ymd)(target.sunday);
+    const list = await (0, db_1.query)(`SELECT p.id AS period_id, p.enrollment_id, p.checkin_id, p.task_met, p.data_available
+       FROM period p
+       JOIN enrollment e ON e.id = p.enrollment_id
+      WHERE p.iso_year = ? AND p.iso_week = ?
+        AND e.status IN ('normal','pause1','pause3')`, [target.year, target.week]);
+    let evaluated = 0;
+    let met = 0;
+    let missed = 0;
+    let skipped = 0;
+    for (const r of list.rows) {
+        const hasCheckin = !!r.checkin_id;
+        const dataOk = Number(r.data_available) === 1;
+        if (hasCheckin && !dataOk) {
+            skipped += 1;
+            continue;
+        }
+        const isMet = hasCheckin && Number(r.task_met) === 1;
+        try {
+            await (0, db_1.query)(`INSERT INTO weekly_eval_log
+           (id, enrollment_id, week, met, days, threshold, window_start, window_end, met_method)
+         VALUES (?,?,?,?,?,?,?,?,'streak5')`, [(0, db_1.newId)(), r.enrollment_id, week, isMet, isMet ? 5 : 0, 5, windowStart, windowEnd]);
+        }
+        catch (err) {
+            if (err?.errno === 1062 || err?.code === "ER_DUP_ENTRY") {
+                skipped += 1;
+                continue;
+            }
+            throw err;
+        }
+        await evaluateWeek(r.enrollment_id, isMet);
+        await (0, db_1.query)(`UPDATE period SET current_period = period_no WHERE id = ?`, [r.period_id]).catch(() => undefined);
+        evaluated += 1;
+        if (isMet)
+            met += 1;
+        else
+            missed += 1;
+    }
+    return { week, evaluated, met, missed, skipped };
 }
 /**
  * 20261018 P1-1 修正: 旧算法以「年内第 N 个 7 天」编号, 与 ISO 周系统性偏移,

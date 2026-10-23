@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>养鱼免单 · 任务名单集合页</title>
+  <link rel="stylesheet" href="./assets/fed-tokens.css" />
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">同城智慧商业联邦 <small>· 任务名单</small></div>
+    <span class="muted" style="margin-left:auto" id="who"></span>
+  </div>
+  <div class="container" id="app"></div>
+  <div class="toast"></div>
+
+  <script type="module">
+    import { api, toast } from "./assets/api.js";
+    const merchantId = new URLSearchParams(location.search).get("m") || "M001";
+    const role = new URLSearchParams(location.search).get("r") || "MERCHANT";
+    document.getElementById("who").textContent = role + " " + merchantId;
+    try { await api.login(role.toLowerCase() + "_" + merchantId, role, merchantId); }
+    catch (e) { toast("登录失败：" + e.message); }
+    const app = document.getElementById("app");
+
+    app.innerHTML = `
+      <div class="card"><h2>本店入渔用户</h2>
+        <div class="row" style="align-items:center">
+          <select id="filter">
+            <option value="">全部</option>
+            <option value="normal">正常</option>
+            <option value="pause2">停奖2</option>
+            <option value="pause6">停奖6</option>
+            <option value="exited">退出</option>
+          </select>
+          <button class="btn ghost" id="export">导出 CSV</button>
+        </div>
+        <table style="margin-top:12px"><thead><tr>
+          <th>用户</th><th>卡类型</th><th>剩余次数</th><th>本周达标</th><th>惩罚状态</th><th>累计奖励</th>
+        </tr></thead><tbody id="rows"></tbody></table>
+      </div>`;
+
+    document.getElementById("filter").onchange = load;
+    document.getElementById("export").onclick = exportCsv;
+
+    async function load() {
+      const status = document.getElementById("filter").value;
+      let list = [];
+      try { list = await api.listRoster(merchantId, status); } catch (e) { toast(e.message); }
+      document.getElementById("rows").innerHTML = list.map(e => `
+        <tr>
+          <td class="muted">${e.userId.slice(0, 6)}…</td>
+          <td>—</td>
+          <td>${e.rewardTotal > 0 ? Math.ceil((e.rewardTotal - e.rewardPaid) / (e.rewardTotal || 1) * 100) + "%" : "—"}</td>
+          <td><span class="pill ${e.status}">${e.status}</span></td>
+          <td>${e.status}</td>
+          <td>¥${e.rewardPaid}</td>
+        </tr>`).join("") || '<tr><td colspan="6" class="muted">暂无数据</td></tr>';
+    }
+
+    function exportCsv() {
+      toast("导出功能在生产环境对接名单下载接口");
+    }
+
+    load();
+  </script>
+</body>
+</html>

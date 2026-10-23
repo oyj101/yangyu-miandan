@@ -41,7 +41,6 @@ const http_1 = require("../../lib/http");
 const svc = __importStar(require("./card.service"));
 const createSchema = zod_1.z.object({
     merchantId: zod_1.z.string().min(1),
-    merchantName: zod_1.z.string().max(64).optional(),
     type: zod_1.z.enum(["year", "times"]),
     times: zod_1.z.number().int().positive(),
     freq: zod_1.z.string().min(1),
@@ -55,7 +54,47 @@ const reviewSchema = zod_1.z.object({
     approve: zod_1.z.boolean(),
     rejectReason: zod_1.z.string().optional(),
 });
+// v2：平台设计套餐卡（商户不定价）
+const designSchema = zod_1.z.object({
+    merchantId: zod_1.z.string().min(1),
+    unitPrice: zod_1.z.number().positive(),
+    periods: zod_1.z.number().int().positive(),
+    supplyPrice: zod_1.z.number().nonnegative(),
+    suppliesName: zod_1.z.string().min(1).max(120),
+    // 集合页展示三件套：名称/卖点/商户名。缺省时 title 回落 suppliesName。
+    title: zod_1.z.string().max(120).optional(),
+    subtitle: zod_1.z.string().max(255).nullish(),
+    merchantName: zod_1.z.string().max(120).nullish(),
+    freq: zod_1.z.string().optional(),
+    category: zod_1.z.string().max(32).nullable().optional(),
+    coverUrl: zod_1.z.string().max(512).nullable().optional(),
+    sortWeight: zod_1.z.number().int().optional(),
+    coverageCap: zod_1.z.number().min(0).max(2).optional(),
+    /** 每卡独立分享分成（0~0.5）；不传取全局缺省 */
+    shareRatio: zod_1.z.number().min(0).max(0.5).optional(),
+    forceRisk: zod_1.z.boolean().optional(),
+});
 exports.cardRouter = (0, express_1.Router)();
+exports.cardRouter.post("/design", (0, auth_1.auth)(["OPERATOR"]), async (req, res, next) => {
+    try {
+        const body = designSchema.parse(req.body);
+        const card = await svc.designPackageCard(body, req.user.userId, {
+            forceRisk: !!body.forceRisk,
+        });
+        (0, http_1.created)(res, card);
+    }
+    catch (e) {
+        next(e);
+    }
+});
+exports.cardRouter.get("/exposure", (0, auth_1.auth)(["OPERATOR"]), async (_req, res, next) => {
+    try {
+        (0, http_1.ok)(res, await svc.budgetExposure());
+    }
+    catch (e) {
+        next(e);
+    }
+});
 exports.cardRouter.post("/", (0, auth_1.auth)(["MERCHANT"]), async (req, res, next) => {
     try {
         const body = createSchema.parse(req.body);
@@ -116,24 +155,27 @@ exports.cardRouter.put("/params/:key", (0, auth_1.auth)(["OPERATOR"]), async (re
         next(e);
     }
 });
-// FEDERATION_API · 联邦消费项目集合（公开，游客可访问）：跨商户聚合。
-// GET /api/cards/federation?status=active|pending|offline|all&q=关键词
-exports.cardRouter.get("/federation", async (req, res, next) => {
-    try {
-        const status = String(req.query.status || "active");
-        const q = String(req.query.q || "").trim();
-        const data = await svc.listFederation(status, q);
-        (0, http_1.ok)(res, data);
-    }
-    catch (e) {
-        next(e);
-    }
-});
 // [Task-213] 公开免单卡列表（C 端「拼场大厅」）：联邦登录用户可浏览已上架卡片。
+// 原先直接返回 Card 实体，等于把 supply_price（商户供应价）发给所有登录用户 ——
+// 商户拿到这个数就能算出平台每期毛利并压价。此处收敛为白名单投影。
 exports.cardRouter.get("/public", (0, auth_1.auth)(["USER", "MERCHANT", "OPERATOR", "CASHIER"]), async (_req, res, next) => {
     try {
         const cards = await svc.listPublicCards();
-        (0, http_1.ok)(res, cards);
+        (0, http_1.ok)(res, cards.map((c) => ({
+            id: c.id,
+            title: c.title,
+            subtitle: c.subtitle,
+            merchantName: c.merchantName,
+            merchantId: c.merchantId,
+            category: c.category,
+            coverUrl: c.coverUrl,
+            unitPrice: c.unitPrice,
+            periods: c.periods,
+            price: c.price,
+            shareRatio: c.shareRatio,
+            soldCount: null,
+            listedAt: c.listedAt,
+        })));
     }
     catch (e) {
         next(e);

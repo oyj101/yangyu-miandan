@@ -47,9 +47,21 @@ exports.enrollmentRouter.post("/purchase", (0, auth_1.auth)(["USER"]), async (re
         const body = purchaseSchema.parse(req.body);
         const cardId = body.cardId;
         const e = await svc.purchase(req.user.userId, cardId, { pay: body.pay, channel: body.channel, openid: body.openid });
-        // 20261017 转介绍30%触发(异fire-and-forget, 不阻塞购卡响应)
-        Promise.resolve().then(() => __importStar(require("../reward/reward.service"))).then((m) => m.triggerIntroBonus(req.user.userId, cardId))
-            .catch((err) => console.error("[intro] trigger failed", err?.message));
+        /**
+         * 分享判定不再挂在「购买」上（2026-10-21 第三代口径）：
+         *   尾款归属由分享绑定（share_bind）决定，绑定发生在被分享者开链接那一刻，
+         *   与"谁买了什么"无关。购买时再判一次会与绑定口径打架，也可能给同一个人发两份。
+         *   这里只为存量 v1 卡保留旧的转介绍逻辑（它没有 share_bind 通道）。
+         */
+        Promise.resolve().then(() => __importStar(require("../card/card.repo"))).then(async (m) => {
+            const card = await m.findCardById(cardId);
+            const isPackage = !!(card && card.periods != null && card.unitPrice != null);
+            if (isPackage)
+                return null; // 套餐卡：由绑定通路处理
+            const rw = await Promise.resolve().then(() => __importStar(require("../reward/reward.service")));
+            return rw.triggerIntroBonus(req.user.userId, cardId);
+        })
+            .catch((err) => console.error("[share] trigger failed", err?.message));
         (0, http_1.created)(res, e);
     }
     catch (e2) {
@@ -66,16 +78,6 @@ exports.enrollmentRouter.post("/:id/refund", (0, auth_1.auth)(["USER", "OPERATOR
         const byOperator = req.user.role === "OPERATOR" && req.user.userId !== (await svc.getEnrollmentUserId(req.params.id));
         const r = await svc.refundEnrollment(req.user.userId, req.params.id, { channel, byOperator });
         (0, http_1.ok)(res, r);
-    }
-    catch (e2) {
-        next(e2);
-    }
-});
-// 20261017 支付完成后由前端调用: 向统一支付真源查单并同步本地(也可由核销前自动同步兜底)
-exports.enrollmentRouter.post("/:id/pay-sync", (0, auth_1.auth)(["USER", "OPERATOR"]), async (req, res, next) => {
-    try {
-        const st = await svc.syncPayStatus(req.params.id);
-        (0, http_1.ok)(res, { payStatus: st });
     }
     catch (e2) {
         next(e2);

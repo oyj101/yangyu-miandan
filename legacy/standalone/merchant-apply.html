@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>养鱼免单 · 商户免单卡申请</title>
+  <link rel="stylesheet" href="./assets/fed-tokens.css" />
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">同城智慧商业联邦 <small>· 养鱼免单</small></div>
+    <span class="muted" style="margin-left:auto" id="who"></span>
+  </div>
+  <div class="container" id="app"></div>
+  <div class="toast"></div>
+
+  <script type="module">
+    import { api, toast } from "./assets/api.js";
+    const who = document.getElementById("who");
+    const app = document.getElementById("app");
+    const merchantId = new URLSearchParams(location.search).get("m") || "M001";
+
+    async function boot() {
+      try { await api.login("merchant_" + merchantId, "MERCHANT", merchantId); }
+      catch (e) { toast("登录失败：" + e.message); }
+      who.textContent = "商家 " + merchantId;
+      renderForm();
+      renderList();
+    }
+
+    function renderForm() {
+      app.innerHTML = `
+        <div class="card">
+          <h2>申请免单消费卡</h2>
+          <div class="row">
+            <div><label>卡类型</label>
+              <select id="type"><option value="year">年卡</option><option value="times">次卡</option></select></div>
+            <div><label>约定次数</label><input id="times" type="number" value="48" /></div>
+          </div>
+          <div class="row">
+            <div><label>约定到店频率</label><input id="freq" value="每周三晚" /></div>
+            <div><label>单次奖励(调理资金)</label><input id="rpt" type="number" value="20" /></div>
+          </div>
+          <div class="row">
+            <div><label>卡售价(元)</label><input id="price" type="number" value="1920" /></div>
+            <div><label>免单覆盖率</label><input id="coverage" type="number" step="0.1" value="1.0" /></div>
+          </div>
+          <p class="muted">规则：单次奖励 × 次数 ≤ 卡售价 × coverage_cap（防倒挂）；每店限量发行。</p>
+          <button class="btn" id="submit">提交审核</button>
+        </div>`;
+      document.getElementById("submit").onclick = submit;
+    }
+
+    async function submit() {
+      const payload = {
+        merchantId,
+        type: document.getElementById("type").value,
+        times: +document.getElementById("times").value,
+        freq: document.getElementById("freq").value,
+        rewardPerTime: +document.getElementById("rpt").value,
+        price: +document.getElementById("price").value,
+        coverage: +document.getElementById("coverage").value,
+      };
+      try {
+        await api.createCard(payload);
+        toast("已提交，进入待审核");
+        renderList();
+      } catch (e) { toast("提交失败：" + e.message); }
+    }
+
+    async function renderList() {
+      let cards = [];
+      try { cards = await api.listMerchantCards(merchantId); } catch (e) {}
+      const rows = cards.map(c => `
+        <tr><td>${c.type === "year" ? "年卡" : "次卡"}</td><td>${c.times}次</td>
+        <td>¥${c.price}</td><td>¥${c.rewardPerTime}/次</td>
+        <td><span class="pill ${c.status}">${c.status}</span></td></tr>`).join("");
+      app.insertAdjacentHTML("beforeend", `
+        <div class="card"><h2>我的免单卡</h2>
+          <table><thead><tr><th>类型</th><th>次数</th><th>售价</th><th>单次奖励</th><th>状态</th></tr></thead>
+          <tbody>${rows || '<tr><td colspan="5" class="muted">暂无</td></tr>'}</tbody></table></div>`);
+    }
+
+    boot();
+  </script>
+</body>
+</html>
