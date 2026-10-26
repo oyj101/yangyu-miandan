@@ -16,6 +16,7 @@ const fund_1 = require("../../lib/fund");
 const engine_1 = require("./engine");
 const enrollment_repo_1 = require("../enrollment/enrollment.repo");
 const card_repo_1 = require("../card/card.repo");
+const notify_service_1 = require("../notify/notify.service");
 const iso_week_1 = require("../period/iso-week");
 /**
  * F5/F6：核销履约时计算奖励。受 4.3 状态机 + 免单上限(coverage_cap) 双重约束。
@@ -230,8 +231,23 @@ async function evaluateWeek(enrollmentId, met) {
     const e = await (0, enrollment_repo_1.findEnrollment)(enrollmentId);
     if (!e)
         throw (0, errors_1.notFound)("入渔记录不存在");
+    const prevStatus = (0, enrollment_repo_1.toState)(e).status;
     const next = (0, engine_1.evaluateWeekly)((0, enrollment_repo_1.toState)(e), met);
     await (0, enrollment_repo_1.updateEnrollState)(db_1.pool, e.id, next);
+    // 活动退出通知（时序图「24 活动退出通知」）：仅在状态由非退出跳变为退出这一刻触发，
+    // 幂等由 biz_key=exit:{enrollmentId} 兜底。fire-and-forget，通知故障绝不反噬周评估主流程。
+    if (next.status === "exited" && prevStatus !== "exited") {
+        const aiUid = await (0, fund_1.resolveAiUid)(e.userId).catch(() => null);
+        let cardTitle = "";
+        try {
+            const c = await (0, card_repo_1.findCardById)(e.cardId);
+            cardTitle = c?.title ?? "";
+        }
+        catch {
+            /* 卡名缺失不影响通知发送 */
+        }
+        (0, notify_service_1.pushExitNotice)({ userId: e.userId, aiUid, enrollmentId: e.id, cardTitle }).catch((err) => logger_1.logger.warn({ err, enrollmentId: e.id }, "退出活动通知发送失败(非阻断)"));
+    }
     return next;
 }
 /**

@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.listPendingCards = exports.listMerchantCards = void 0;
+exports.classifySupplyRatio = classifySupplyRatio;
 exports.evaluateShareRatio = evaluateShareRatio;
 exports.createApplication = createApplication;
 exports.review = review;
@@ -14,6 +15,8 @@ const config_1 = require("../../config");
 const errors_1 = require("../../lib/errors");
 const card_repo_1 = require("./card.repo");
 const db_1 = require("../../lib/db");
+const submission_repo_1 = require("../submission/submission.repo");
+const catalog_repo_1 = require("../catalog/catalog.repo");
 /**
  * 每卡分享分成的准入判定（纯函数，便于穷举测试）。
  *
@@ -29,6 +32,20 @@ const db_1 = require("../../lib/db");
  *
  * 余额平衡达标率：a* = (1−c) / (1 − r(1−s))，r 越高越安全，s 越高越危险。
  */
+/**
+ * 供应价率三档分界（20261025 PO 拍板）：
+ *   c ≤ 0.3（ratioMax）        → 自动通过（核销环节不亏，零毛利线以上）
+ *   0.3 < c ≤ 0.8（hardMax）   → 需 OPERATOR 二次确认 + 预算专项审批（forceRisk=true 留审计）
+ *   c > 0.8                    → 恒拒绝，不可上架
+ * 返回 'ok' | 'confirm' | 'reject'，供 designPackageCard 与单测共用。
+ */
+function classifySupplyRatio(ratio, ratioMax, hardMax) {
+    if (ratio > hardMax)
+        return "reject";
+    if (ratio > ratioMax)
+        return "confirm";
+    return "ok";
+}
 function evaluateShareRatio(unitPrice, supplyPrice, shareRatio, max) {
     const nowRefund = Math.round(unitPrice * (1 - shareRatio) * 100) / 100;
     const retain = Math.round((unitPrice * shareRatio - supplyPrice) * 100) / 100;
@@ -100,7 +117,35 @@ async function review(cardId, approve, operator, rejectReason) {
 async function designPackageCard(input, operator, opts = {}) {
     const unitPrice = Math.round(Number(input.unitPrice) * 100) / 100;
     const periods = Math.floor(Number(input.periods));
-    const supplyPrice = Math.round(Number(input.supplyPrice) * 100) / 100;
+    // ---------- 商品库选品解析（2026-10-25） ----------
+    // 优先级：submissionId（已审核通过的提报）→ productId（直接关联商品）→ 无（纯手填）
+    // submissionId 模式：从提报取 supplyPrice / quota(→stock) / product，product 名与封面作为缺省。
+    let productId = input.productId ?? null;
+    let stock = input.stock ?? null;
+    let supplyPrice = Math.round(Number(input.supplyPrice) * 100) / 100;
+    let effectiveTitle = input.title ?? input.suppliesName;
+    let effectiveCoverUrl = input.coverUrl ?? null;
+    if (input.submissionId) {
+        const sub = await (0, submission_repo_1.findSubmissionById)(input.submissionId);
+        if (!sub)
+            throw (0, errors_1.notFound)("提报不存在");
+        if (sub.status !== "approved") {
+            throw (0, errors_1.badRequest)("提报尚未审核通过，不能据此设计套餐卡");
+        }
+        if (sub.merchantId !== input.merchantId) {
+            throw (0, errors_1.badRequest)("提报所属商户与设计卡商户不一致");
+        }
+        supplyPrice = sub.supplyPrice;
+        stock = sub.quota;
+        productId = sub.productId;
+        const product = await (0, catalog_repo_1.findProductById)(sub.productId);
+        if (product) {
+            if (!input.title)
+                effectiveTitle = product.name;
+            if (!input.coverUrl)
+                effectiveCoverUrl = product.coverUrl;
+        }
+    }
     if (!(unitPrice > 0))
         throw (0, errors_1.validationError)("单价必须大于 0", { unitPrice });
     if (!(periods > 0) || periods > 520)
@@ -111,12 +156,19 @@ async function designPackageCard(input, operator, opts = {}) {
         throw (0, errors_1.validationError)("供应价高于单价，存在倒挂风险", { supplyPrice, unitPrice });
     }
     const ratio = supplyPrice / unitPrice;
-    const ratioMax = config_1.config.package.supplyRatioMax;
-    if (ratio > 0.5) {
-        throw (0, errors_1.validationError)(`供应价率 ${(ratio * 100).toFixed(1)}% 超过 50% 硬上限：按模型要求达标率必须低于 50%，产品不可持续`, { supplyPrice, unitPrice, ratio });
+    const band = classifySupplyRatio(ratio, config_1.config.package.supplyRatioMax, config_1.config.package.supplyRatioHardMax);
+    if (band === "reject") {
+        throw (0, errors_1.validationError)(`供应价率 ${(ratio * 100).toFixed(1)}% 超过 ${(config_1.config.package.supplyRatioHardMax * 100).toFixed(0)}% 硬上限（20261025 PO 拍板：0.3~0.8 需预算专项审批，超 0.8 不可上架）`, { supplyPrice, unitPrice, ratio });
     }
-    if (ratio > ratioMax && !opts.forceRisk) {
-        throw (0, errors_1.validationError)(`供应价率 ${(ratio * 100).toFixed(1)}% 超过红线 ${(ratioMax * 100).toFixed(0)}%，需二次确认并留审计`, { supplyPrice, unitPrice, ratio, ratioMax, needConfirm: true });
+    if (band === "confirm" && !opts.forceRisk) {
+        throw (0, errors_1.validationError)(`供应价率 ${(ratio * 100).toFixed(1)}% 落在 ${(config_1.config.package.supplyRatioMax * 100).toFixed(0)}%~${(config_1.config.package.supplyRatioHardMax * 100).toFixed(0)}% 预算专项审批区间，需二次确认并留审计（携带 forceRisk=true 重提）`, {
+            supplyPrice,
+            unitPrice,
+            ratio,
+            ratioMax: config_1.config.package.supplyRatioMax,
+            hardMax: config_1.config.package.supplyRatioHardMax,
+            needConfirm: true,
+        });
     }
     // ---------- 每卡分享分成（2026-10-21：逐卡可配，不再是全局 0.3） ----------
     const shareRatio = Math.round((input.shareRatio ?? config_1.config.package.shareRatioDefault) * 1000) / 1000;
@@ -139,6 +191,19 @@ async function designPackageCard(input, operator, opts = {}) {
         underSupplyRisk = true;
     }
     const nowRefund = check.nowRefund;
+    // ---------- 履约能力（配送分支，009）：默认仅自提，与存量卡行为一致 ----------
+    const fulfillment = input.fulfillment ?? "pickup";
+    if (fulfillment !== "pickup" && fulfillment !== "delivery" && fulfillment !== "both") {
+        throw (0, errors_1.validationError)("履约方式只能是 pickup / delivery / both", { fulfillment });
+    }
+    const deliveryFee = Math.round(Number(input.deliveryFee ?? 0) * 100) / 100;
+    if (!Number.isFinite(deliveryFee) || deliveryFee < 0) {
+        throw (0, errors_1.validationError)("运费不能为负", { deliveryFee });
+    }
+    // 仅自提的卡配运费是误配：用户永远用不上，却会出现在运营后台里误导对账
+    if (fulfillment === "pickup" && deliveryFee > 0) {
+        throw (0, errors_1.validationError)("仅到店自提的卡不应配置运费", { fulfillment, deliveryFee });
+    }
     const active = await (0, card_repo_1.countActiveByMerchant)(input.merchantId);
     const quota = config_1.config.reward.perMerchantQuota;
     if (active >= quota)
@@ -149,22 +214,26 @@ async function designPackageCard(input, operator, opts = {}) {
         periods,
         supplyPrice,
         category: input.category ?? null,
-        coverUrl: input.coverUrl ?? null,
+        coverUrl: effectiveCoverUrl,
         sortWeight: input.sortWeight ?? 0,
         coverageCap: input.coverageCap ?? 1.0,
         perMerchantQuota: quota,
-        // 集合页主标题：缺省回落到 suppliesName，避免「设计时填了名、上架后卡片没名」
-        title: (input.title ?? input.suppliesName).slice(0, 120),
+        // 集合页主标题：缺省回落到 suppliesName / 商品名，避免「设计时填了名、上架后卡片没名」
+        title: effectiveTitle.slice(0, 120),
         subtitle: input.subtitle ?? null,
         merchantName: input.merchantName ?? null,
         shareRatio,
+        productId,
+        stock,
+        fulfillment,
+        deliveryFee,
     });
     const total = Math.round(unitPrice * periods * 100) / 100;
     await (0, db_1.query)(`INSERT INTO audit (id, operator, action, ref_type, ref_id, \`after\`)
      VALUES (?,?,?,?,?,?)`, [
         (0, db_1.newId)(),
         operator,
-        ratio > ratioMax || underSupplyRisk ? "card.design.override" : "card.design",
+        band === "confirm" || underSupplyRisk ? "card.design.override" : "card.design",
         "card",
         card.id,
         JSON.stringify({
@@ -174,15 +243,21 @@ async function designPackageCard(input, operator, opts = {}) {
             total,
             supplyPrice,
             ratio,
-            ratioMax,
+            ratioMax: config_1.config.package.supplyRatioMax,
+            hardMax: config_1.config.package.supplyRatioHardMax,
             shareRatio,
             supplyRatio,
             nowRefund,
             netPerPeriod: check.retain,
             underSupplyRisk,
             forceRisk: !!opts.forceRisk,
-            name: input.suppliesName,
+            name: effectiveTitle,
             title: card.title,
+            submissionId: input.submissionId ?? null,
+            productId,
+            fulfillment,
+            deliveryFee,
+            freightTotal: Math.round(deliveryFee * periods * 100) / 100,
         }),
     ]);
     return card;

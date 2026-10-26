@@ -20,6 +20,9 @@ const auth_controller_1 = require("./features/auth/auth.controller");
 const period_controller_1 = require("./features/period/period.controller");
 const merchant_controller_1 = require("./features/merchant/merchant.controller");
 const notify_controller_1 = require("./features/notify/notify.controller");
+const catalog_controller_1 = require("./features/catalog/catalog.controller");
+const submission_controller_1 = require("./features/submission/submission.controller");
+const delivery_controller_1 = require("./features/delivery/delivery.controller");
 const sdk_controller_1 = require("./features/sdk/sdk.controller");
 /**
  * 服务定位：**纯 API**。
@@ -65,6 +68,10 @@ function createApp() {
     app.use("/api/periods", period_controller_1.periodRouter);
     app.use("/api/merchant", merchant_controller_1.merchantRouter);
     app.use("/api/notify", notify_controller_1.notifyRouter);
+    app.use("/api/catalog", catalog_controller_1.catalogRouter);
+    app.use("/api/submissions", submission_controller_1.submissionRouter);
+    // 配送分支（009）：到店自提走 /api/checkin，配送到家走 /api/delivery
+    app.use("/api/delivery", delivery_controller_1.deliveryRouter);
     app.use(errorHandler_1.notFoundHandler);
     app.use(errorHandler_1.errorHandler);
     logger_1.logger.info("应用已装配（API-only，页面由内联 SDK 提供）");

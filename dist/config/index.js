@@ -103,6 +103,9 @@ exports.config = {
         // 供应价率红线：c ≤ 0.3 时「达标未分享」净额 = 0.3P − C ≥ 0，
         // 即核销环节不亏，唯一支出是分享退（应按 CAC 立项）。超过此值建卡需二次确认。
         supplyRatioMax: num("YANGYU_SUPPLY_RATIO_MAX", 0.3),
+        // 20261025 PO 拍板：0.3~0.8 走「OPERATOR 二次确认 + 预算专项审批」区间（forceRisk=true），
+        // >0.8 恒拒绝不可上架。旧写死 0.5 硬上限作废。
+        supplyRatioHardMax: num("YANGYU_SUPPLY_RATIO_HARD_MAX", 0.8),
         budgetWarnRatio: num("YANGYU_BUDGET_WARN_RATIO", 1.2),
         /**
          * 分享解锁范围：all（默认，2026-10-21 PO 拍板）= 该分享者名下全部未解锁卡；
@@ -183,9 +186,23 @@ exports.config = {
         serviceKey: process.env.WALLET_SERVICE_KEY ?? "",
     },
     /**
-     * 微信模板消息（临期提醒附加通道）。模板 52850「订座结果提醒」。
+     * 通知通道总开关（20261026 两线合并统一语义）。
+     * on  = WECHAT_NOTIFY_ENABLED 未设 "false" 且 wechat.templateId 非空
+     * off = WECHAT_NOTIFY_ENABLED=false（应急杀开关，全站微信通道静默，含扫描推送）
+     * 站内信(inbox)永远在线；微信(wechat)为附加通道，走主平台 8100 模板消息服务。
+     * 关键纪律：fail-soft —— 任一通道故障/未配置都不影响 inbox 与业务主流程。
+     */
+    notify: {
+        wechat: {
+            /** 应急杀开关：置 "false" 时微信通道静默（含临期提醒扫描推送） */
+            enabled: process.env.WECHAT_NOTIFY_ENABLED !== "false",
+        },
+    },
+    /**
+     * 微信模板消息。模板 52850「订座结果提醒」（20261026 实测锁定）。
      * const1 是枚举管控字段：enumResult 的值必须在公众号后台「管理枚举值」里配置过，
-     * 否则微信恒拒 47003（20261026 实测）。character_string2 只收字母/数字/符号。
+     * 否则微信恒拒 47003。character_string2 只收字母/数字/符号（中文非法）。
+     * 5 字段全必填：const1/character_string2/thing8/thing4/time3。
      */
     wechat: {
         templateId: process.env.WX_TEMPLATE_ID ||

@@ -14,6 +14,7 @@ exports.hasNoticeFlag = hasNoticeFlag;
 exports.expirePast = expirePast;
 exports.listExpiringSoon = listExpiringSoon;
 const db_1 = require("../../lib/db");
+const date_1 = require("../../lib/date");
 function mapRow(r) {
     return {
         id: r.id,
@@ -24,8 +25,10 @@ function mapRow(r) {
         periodNo: Number(r.period_no),
         isoYear: Number(r.iso_year),
         isoWeek: Number(r.iso_week),
-        weekStart: String(r.week_start).slice(0, 10),
-        weekEnd: String(r.week_end).slice(0, 10),
+        // week_start/week_end 是 DATE 列：mysql2 返回 Date 对象，必须走 ymdOf，
+        // 直接 String(Date).slice(0,10) 会得到 'Tue Nov 03' → 周边界比较全部 NaN
+        weekStart: (0, date_1.ymdOfOrEmpty)(r.week_start),
+        weekEnd: (0, date_1.ymdOfOrEmpty)(r.week_end),
         unitPrice: Number(r.unit_price),
         supplyPrice: Number(r.supply_price),
         // 006 快照列；旧行/未迁移环境回落到全局缺省，保证金额口径不会变成 NaN
@@ -34,7 +37,7 @@ function mapRow(r) {
         checkinId: r.checkin_id || null,
         taskMet: Number(r.task_met) === 1,
         metDays: Number(r.met_days) || 0,
-        windowStart: r.window_start ? String(r.window_start).slice(0, 10) : null,
+        windowStart: (0, date_1.ymdOf)(r.window_start),
         refund70Amount: Number(r.refund70_amount) || 0,
         refund70Flow: r.refund70_flow || null,
         refund70At: r.refund70_at || null,

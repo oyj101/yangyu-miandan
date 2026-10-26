@@ -1,18 +1,24 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.dueNotices = dueNotices;
+exports.wechatEnabled = wechatEnabled;
+exports.exitChannels = exitChannels;
 exports.pushNotice = pushNotice;
+exports.sendWechat = sendWechat;
+exports.pushExitNotice = pushExitNotice;
 exports.runNoticeScan = runNoticeScan;
 exports.listMessages = listMessages;
 exports.countUnread = countUnread;
 exports.markRead = markRead;
 exports.toNoticePeriod = toNoticePeriod;
 const db_1 = require("../../lib/db");
+const config_1 = require("../../config");
+const logger_1 = require("../../lib/logger");
+const date_1 = require("../../lib/date");
 const iso_week_1 = require("../period/iso-week");
 const period_types_1 = require("../period/period.types");
 const period_repo_1 = require("../period/period.repo");
 const wechat_1 = require("./wechat");
-const logger_1 = require("../../lib/logger");
 /**
  * 计算某期次在今天应该发哪些提醒。
  *
@@ -82,8 +88,42 @@ function dueNotices(p, today) {
     }
     return out.filter((n) => (p.noticeFlags & n.flag) === 0);
 }
-/** 幂等推送：biz_key = {type}:{periodId}，重复调用不产生第二条 */
+/**
+ * 微信通道总开关（20261026 两线合并统一语义）：
+ * 应急杀开关未触发 且 模板 ID 已配置。模板 ID 在 config.wechat 有硬编码缺省，
+ * 所以线上默认开启；本地/CI 可用 WECHAT_NOTIFY_ENABLED=false 一键全关。
+ */
+function wechatEnabled() {
+    return config_1.config.notify.wechat.enabled && Boolean(config_1.config.wechat.templateId);
+}
+/**
+ * 退出活动通知的通道选择（纯函数，便于单测）。
+ * wechat 仅在通道开启时纳入，否则只走 inbox。
+ */
+function exitChannels() {
+    return wechatEnabled() ? ["inbox", "wechat"] : ["inbox"];
+}
+/** 幂等推送：biz_key 唯一，重复调用不产生第二条。channels 缺省按通道开关自动决定。 */
 async function pushNotice(input) {
+    const channels = input.channels ?? (wechatEnabled() ? ["inbox", "wechat"] : ["inbox"]);
+    // 站内信是可靠主通道，永远先落库
+    let inboxOk = true;
+    if (channels.includes("inbox")) {
+        inboxOk = await insertInbox(input);
+    }
+    // 微信是附加通道，失败不影响主流程（fail-soft）
+    if (inboxOk && channels.includes("wechat")) {
+        await sendWechat({
+            aiUid: input.aiUid,
+            type: input.type,
+            title: input.title,
+            body: input.body,
+            fields: input.fields,
+        }).catch((e) => logger_1.logger.warn({ err: e }, "微信通知发送异常(非阻断)"));
+    }
+    return inboxOk;
+}
+async function insertInbox(input) {
     try {
         await (0, db_1.query)(`INSERT INTO notify_message
          (id, user_id, ai_uid, type, title, body, ref_type, ref_id, channel, state, biz_key)
@@ -98,24 +138,6 @@ async function pushNotice(input) {
             input.refId ?? null,
             input.bizKey,
         ]);
-        // 站内信新增成功 → 附带微信模板推送（仅新增时推，重复扫描不重复骚扰）。
-        // 微信是附加通道：失败只记录日志，绝不回滚站内信，也不抛错影响主链路。
-        (0, wechat_1.pushWechatTemplate)({
-            yangyuUid: input.userId,
-            title: input.title,
-            body: input.body,
-            scene: input.type,
-            fields: input.fields,
-        })
-            .then((r) => {
-            if (!r.sent) {
-                logger_1.logger.warn("[notify] 微信推送未送达 uid=%s type=%s state=%s errcode=%s err=%s", input.userId, input.type, r.state, r.errcode, r.error);
-            }
-            else {
-                logger_1.logger.info("[notify] 微信推送已送达 uid=%s type=%s", input.userId, input.type);
-            }
-        })
-            .catch((e) => logger_1.logger.warn("[notify] 微信推送异常 uid=%s %s", input.userId, e?.message));
         return true;
     }
     catch (err) {
@@ -125,20 +147,64 @@ async function pushNotice(input) {
     }
 }
 /**
+ * 微信模板消息发送（fail-soft）。
+ * 20261026 合并：实现统一收敛到 ./wechat 的 pushWechatTemplate（模板 52850 五字段、
+ * 8100 /api/v2/wechat/template/send，经端到端实测）。本函数保留通道开关/跳过语义作为统一出口。
+ */
+async function sendWechat(input) {
+    if (!wechatEnabled())
+        return { sent: false, skipped: true, err: "wechat 通道未开启" };
+    if (!input.aiUid)
+        return { sent: false, skipped: true, err: "缺少 ai_uid" };
+    // pushWechatTemplate 入参是养鱼侧 uid（"au_17"）或平台数字 id 字符串，两者都兼容。
+    const r = await (0, wechat_1.pushWechatTemplate)({
+        yangyuUid: String(input.aiUid),
+        title: input.title,
+        body: input.body,
+        scene: input.type,
+        fields: input.fields,
+    });
+    // skipped 判定：配置缺失 / uid 无法解析 / 该用户无 openid 绑定（8100 fail-soft state）
+    const skipped = !r.sent &&
+        (r.state === "no_openid" ||
+            r.state === "wx_unconfigured" ||
+            /未配置|无法解析/.test(r.error ?? ""));
+    if (!r.sent) {
+        logger_1.logger.warn("[notify] 微信推送未送达 uid=%s type=%s state=%s errcode=%s err=%s", input.aiUid, input.type, r.state, r.errcode, r.error);
+    }
+    return { sent: r.sent, skipped, err: r.error ?? r.state };
+}
+/**
+ * 活动退出通知（时序图「24 活动退出通知」）。
+ * 触达：站内信（永远）+ 微信（开启时）；幂等键 biz_key=exit:{enrollmentId} 防重发。
+ * 文案明确「已达标期次返现不受影响」，避免用户误以为钱没了。
+ */
+async function pushExitNotice(input) {
+    const channels = exitChannels();
+    const title = "养鱼免单活动已退出";
+    const body = `您参与的「${input.cardTitle || "免单项目"}」因连续或累计未达标已达退出条件，系统已自动退出活动。` +
+        `已核销达标期次的返现不受影响，感谢参与。`;
+    const inbox = await pushNotice({
+        userId: input.userId,
+        aiUid: input.aiUid,
+        type: "exit",
+        title,
+        body,
+        refType: "enrollment",
+        refId: input.enrollmentId,
+        bizKey: `exit:${input.enrollmentId}`,
+        channels,
+    });
+    let wechat = { sent: false, skipped: true };
+    if (channels.includes("wechat")) {
+        wechat = await sendWechat({ aiUid: input.aiUid, type: "exit", title, body });
+    }
+    return { inbox, wechat };
+}
+/**
  * 每日扫描（cron 建议 09:00 + 20:00 各一次）。
  * 只扫"在办且本周内"的期次，历史期次不重复打扰。
  */
-/** DATE 列经 mysql2 返回本地零点 Date 对象；String() 会变成 "Mon Oct 26" 这类
- *  长格式，导致 dayDiff 失效、dueNotices 恒空。必须按本地时区格式化 YYYY-MM-DD。 */
-function dateStr(v) {
-    if (v instanceof Date) {
-        const y = v.getFullYear();
-        const m = String(v.getMonth() + 1).padStart(2, "0");
-        const d = String(v.getDate()).padStart(2, "0");
-        return y + "-" + m + "-" + d;
-    }
-    return String(v ?? "").slice(0, 10);
-}
 async function runNoticeScan(now = new Date()) {
     const today = (0, iso_week_1.ymd)((0, iso_week_1.dateOnly)(now));
     const res = await (0, db_1.query)(`SELECT * FROM period
@@ -153,8 +219,9 @@ async function runNoticeScan(now = new Date()) {
             enrollmentId: r.enrollment_id,
             userId: r.user_id,
             periodNo: Number(r.period_no),
-            weekStart: dateStr(r.week_start),
-            weekEnd: dateStr(r.week_end),
+            // DATE 列：归一成 'YYYY-MM-DD'，否则 String(Date).slice(0,10) = 'Tue Nov 03'
+            weekStart: (0, date_1.ymdOfOrEmpty)(r.week_start),
+            weekEnd: (0, date_1.ymdOfOrEmpty)(r.week_end),
             taskMet: Number(r.task_met) === 1,
             checkinId: r.checkin_id || null,
             expired: Number(r.expired) === 1,

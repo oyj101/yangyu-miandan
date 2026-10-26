@@ -40,13 +40,37 @@ const auth_1 = require("../../middleware/auth");
 const http_1 = require("../../lib/http");
 const errors_1 = require("../../lib/errors");
 const svc = __importStar(require("./enrollment.service"));
-const purchaseSchema = zod_1.z.object({ cardId: zod_1.z.string().min(1), pay: zod_1.z.boolean().optional(), channel: zod_1.z.string().optional(), openid: zod_1.z.string().optional() });
+const receiverSchema = zod_1.z.object({
+    name: zod_1.z.string().min(1).max(64),
+    phone: zod_1.z.string().min(6).max(32),
+    address: zod_1.z.string().min(5).max(255),
+});
+const purchaseSchema = zod_1.z.object({
+    cardId: zod_1.z.string().min(1),
+    pay: zod_1.z.boolean().optional(),
+    channel: zod_1.z.string().optional(),
+    openid: zod_1.z.string().optional(),
+    /** 履约方式：缺省 pickup（存量行为不变） */
+    fulfillMode: zod_1.z.enum(["pickup", "delivery"]).optional(),
+    /** 配送收货信息；fulfillMode=delivery 时必填 */
+    receiver: receiverSchema.optional(),
+});
+const fulfillSchema = zod_1.z.object({
+    mode: zod_1.z.enum(["pickup", "delivery"]),
+    receiver: receiverSchema.optional(),
+});
 exports.enrollmentRouter = (0, express_1.Router)();
 exports.enrollmentRouter.post("/purchase", (0, auth_1.auth)(["USER"]), async (req, res, next) => {
     try {
         const body = purchaseSchema.parse(req.body);
         const cardId = body.cardId;
-        const e = await svc.purchase(req.user.userId, cardId, { pay: body.pay, channel: body.channel, openid: body.openid });
+        const e = await svc.purchase(req.user.userId, cardId, {
+            pay: body.pay,
+            channel: body.channel,
+            openid: body.openid,
+            fulfillMode: body.fulfillMode,
+            receiver: body.receiver,
+        });
         /**
          * 分享判定不再挂在「购买」上（2026-10-21 第三代口径）：
          *   尾款归属由分享绑定（share_bind）决定，绑定发生在被分享者开链接那一刻，
@@ -77,6 +101,37 @@ exports.enrollmentRouter.post("/:id/refund", (0, auth_1.auth)(["USER", "OPERATOR
         const channel = req.body?.channel === "original" ? "original" : "balance";
         const byOperator = req.user.role === "OPERATOR" && req.user.userId !== (await svc.getEnrollmentUserId(req.params.id));
         const r = await svc.refundEnrollment(req.user.userId, req.params.id, { channel, byOperator });
+        (0, http_1.ok)(res, r);
+    }
+    catch (e2) {
+        next(e2);
+    }
+});
+/**
+ * 配送分支（009）：切换履约方式（自提 ↔ 配送）。
+ * 运营可代改（byOperator）；用户只能改自己的。
+ * 已有发货/签收期次时不允许退回自提——实物已经在路上。
+ */
+exports.enrollmentRouter.patch("/:id/fulfill", (0, auth_1.auth)(["USER", "OPERATOR"]), async (req, res, next) => {
+    try {
+        const body = fulfillSchema.parse(req.body ?? {});
+        const byOperator = req.user.role === "OPERATOR" && req.user.userId !== (await svc.getEnrollmentUserId(req.params.id));
+        const e = await svc.setFulfillMode(req.user.userId, req.params.id, body.mode, body.receiver, {
+            byOperator,
+        });
+        (0, http_1.ok)(res, e);
+    }
+    catch (e2) {
+        next(e2);
+    }
+});
+/** 配送分支（009）：运费补付 / 重新下单（幂等，已付直接返回） */
+exports.enrollmentRouter.post("/:id/freight/pay", (0, auth_1.auth)(["USER"]), async (req, res, next) => {
+    try {
+        const r = await svc.payFreight(req.user.userId, req.params.id, {
+            channel: req.body?.channel,
+            openid: req.body?.openid,
+        });
         (0, http_1.ok)(res, r);
     }
     catch (e2) {

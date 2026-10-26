@@ -15,18 +15,7 @@ const merchant_service_1 = require("../merchant/merchant.service");
 const refund_service_1 = require("../refund/refund.service");
 const engine_1 = require("../reward/engine");
 const notify_service_1 = require("../notify/notify.service");
-/**
- * v2 核销：一期限一次 + 判连续 5 天 + 即时结算商户 + 达标退 70%。
- *
- * 与旧 computeOnCheckin 的关键差别：
- *   - 幂等粒度：旧 = (enrollment, 周)；新 = (period_id) 一期限一次
- *   - 发奖判据：旧 = 周内累计天数；新 = 连续 5 天 chat∧feed
- *   - 商户侧：新增即时结算（旧版本商户侧不在这条链上）
- *   - 退费金额：按 unit_price × 70%，不再用"整卡累计封顶"
- *
- * 存量卡（periods 为 null）不走本函数，由调用方回落旧逻辑。
- */
-async function computeOnCheckinV2(enrollmentId, merchantId, now = new Date()) {
+async function computeOnCheckinV2(enrollmentId, merchantId, now = new Date(), opts = {}) {
     const e = await (0, enrollment_repo_1.findEnrollment)(enrollmentId);
     if (!e)
         throw (0, errors_1.notFound)("入渔记录不存在");
@@ -44,11 +33,15 @@ async function computeOnCheckinV2(enrollmentId, merchantId, now = new Date()) {
     if (!guard.canProceed) {
         throw (0, errors_1.conflict)((0, pay_guard_1.payGuardMessage)(guard));
     }
-    const period = await (0, period_service_1.getPeriodAt)(enrollmentId, now);
+    const period = opts.periodId
+        ? await (0, period_repo_1.findById)(opts.periodId)
+        : await (0, period_service_1.getPeriodAt)(enrollmentId, now);
     if (!period) {
         const w = (0, iso_week_1.isoWeekKey)((0, iso_week_1.isoWeekOf)(now));
         throw (0, errors_1.conflict)(`本周（${w}）不属于该入渔的任何一期，可能尚未开始或已走完总期数`);
     }
+    if (period.enrollmentId !== enrollmentId)
+        throw (0, errors_1.notFound)("期次不属于该入渔记录");
     if (period.expired)
         throw (0, errors_1.conflict)("该期次已作废，请联系客服申请补期");
     if (period.checkinId)
@@ -72,8 +65,8 @@ async function computeOnCheckinV2(enrollmentId, merchantId, now = new Date()) {
         try {
             await client.query(`INSERT INTO checkin
            (id, enrollment_id, user_id, merchant_id, card_id, week, rewarded, reward_id, note,
-            period_id, unit_price, supply_price)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, [
+            period_id, unit_price, supply_price, source, delivery_task_id)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
                 checkinId,
                 e.id,
                 e.userId,
@@ -84,10 +77,13 @@ async function computeOnCheckinV2(enrollmentId, merchantId, now = new Date()) {
                 null,
                 `v2 期次#${period.periodNo} ${judge.met ? "连续" + judge.longest + "天达标" : "未达标(最长" + judge.longest + "天)"}` +
                     (paused ? " 停奖期" : "") +
-                    (judge.dataAvailable ? "" : " 任务数据不可用"),
+                    (judge.dataAvailable ? "" : " 任务数据不可用") +
+                    (opts.source === "delivery" ? " 配送签收" : ""),
                 period.id,
                 period.unitPrice,
                 period.supplyPrice,
+                opts.source ?? "counter",
+                opts.deliveryTaskId ?? null,
             ]);
         }
         catch (err) {
@@ -156,6 +152,7 @@ async function computeOnCheckinV2(enrollmentId, merchantId, now = new Date()) {
         }).catch(() => undefined);
     }
     return {
+        checkinId,
         periodId: period.id,
         periodNo: period.periodNo,
         week: weekKey,

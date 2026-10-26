@@ -72,6 +72,16 @@ const designSchema = zod_1.z.object({
     coverageCap: zod_1.z.number().min(0).max(2).optional(),
     /** 每卡独立分享分成（0~0.5）；不传取全局缺省 */
     shareRatio: zod_1.z.number().min(0).max(0.5).optional(),
+    /** 履约能力：缺省 pickup（仅到店自提） */
+    fulfillment: zod_1.z.enum(["pickup", "delivery", "both"]).optional(),
+    /** 配送到家每期运费；缺省 0 */
+    deliveryFee: zod_1.z.number().nonnegative().optional(),
+    /** 商品库选品：直接关联商品（与 submissionId 二选一） */
+    productId: zod_1.z.string().min(1).nullish(),
+    /** 商品库选品：取某条已审核通过的提报（优先；自动带出 supplyPrice/quota/商品名/封面） */
+    submissionId: zod_1.z.string().min(1).nullish(),
+    /** 可售份数上限（传 submissionId 时取 quota，无需再传） */
+    stock: zod_1.z.number().int().nonnegative().nullish(),
     forceRisk: zod_1.z.boolean().optional(),
 });
 exports.cardRouter = (0, express_1.Router)();

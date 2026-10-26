@@ -28,6 +28,15 @@ function mapRow(r) {
         payStatus: (r.pay_status || "none"),
         // v2：分享成交解锁整卡剩余 30%（整卡一次，非每期一次）
         shareUnlocked: Number(r.share_unlocked) === 1,
+        // 配送分支（009）：未迁移环境无这些列时按自提/免运费兜底，读路径不会 NaN
+        fulfillMode: (r.fulfill_mode ?? "pickup"),
+        receiverName: r.receiver_name ?? null,
+        receiverPhone: r.receiver_phone ?? null,
+        receiverAddress: r.receiver_address ?? null,
+        freightAmount: r.freight_amount == null ? 0 : Number(r.freight_amount),
+        freightPayOrderNo: r.freight_pay_order_no || null,
+        freightPayStatus: r.freight_pay_status || "none",
+        totalPeriods: r.total_periods == null ? null : Number(r.total_periods),
     };
 }
 // 主键应用层生成 + 插入后回读（同 card.repo：不依赖 INSERT..RETURNING）

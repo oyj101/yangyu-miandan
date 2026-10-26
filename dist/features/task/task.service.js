@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.parseTaskDaysPayload = parseTaskDaysPayload;
 exports.fetchTaskDays = fetchTaskDays;
 exports.upsertTaskDaily = upsertTaskDaily;
 exports.syncRange = syncRange;
@@ -8,8 +9,55 @@ exports.daysLeftInWeek = daysLeftInWeek;
 const config_1 = require("../../config");
 const db_1 = require("../../lib/db");
 const fund_1 = require("../../lib/fund");
+const date_1 = require("../../lib/date");
 const iso_week_1 = require("../period/iso-week");
 const streak_1 = require("./streak");
+/**
+ * 解析 8100 `/yangyu/task-days` 的响应体（纯函数，便于单测）。
+ *
+ * feed(投喂) 维度的真源就绪校验是**资金安全闸门**，不可省：
+ * met 的定义是 chat>0 且 feed>0。若 8100 的 feed 源未接通（feed_source !== 'chat'），
+ * 它返回的 feed 恒为 0 → 每一天都会被算成"未达标"；而 judgePeriod 里
+ * `dataAvailable = sync.ok || marks.length > 0`，一旦把这种"假成功"当 ok，
+ * dataAvailable 就是 true → 全体正常用户被判未达标 → 罚停 → 强制退出。
+ *
+ * 所以 feed 源未就绪一律视为「数据不可用」：退回与端点缺失时完全一致的保守分支
+ * （不惩罚、不发奖、下轮重试）。主站接通 feed 真源并置 feed_source=chat 后自动恢复。
+ */
+function parseTaskDaysPayload(j) {
+    if (!j || typeof j !== "object") {
+        return { ok: false, daily: [], source: "none", err: "响应非 JSON" };
+    }
+    const code = j.code;
+    if (code !== 0 && code !== "0") {
+        return { ok: false, daily: [], source: "none", err: `8100 code=${code ?? "?"}` };
+    }
+    const arr = j?.data?.daily;
+    if (!Array.isArray(arr)) {
+        return { ok: false, daily: [], source: "daily", err: "响应缺少 data.daily" };
+    }
+    const feedSource = String(j?.data?.feed_source ?? "");
+    if (feedSource !== "chat") {
+        return {
+            ok: false,
+            daily: [],
+            source: "daily",
+            err: `feed 真源未就绪(feed_source=${feedSource || "未声明"})`,
+        };
+    }
+    const daily = [];
+    for (const it of arr) {
+        const d = (0, date_1.ymdOfOrEmpty)(it?.date);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(d))
+            continue;
+        daily.push({
+            date: d,
+            chat: Number(it?.chat) || 0,
+            feed: Number(it?.feed) || 0,
+        });
+    }
+    return { ok: true, daily, source: "daily" };
+}
 /**
  * 从主站 8100 拉取「投孪生聊天 + 投喂」的日明细。
  *
@@ -27,22 +75,7 @@ async function fetchTaskDays(aiUid, from, to) {
             return { ok: false, daily: [], source: "none", err: `HTTP ${resp.status}` };
         }
         const j = await resp.json().catch(() => null);
-        const arr = j?.data?.daily;
-        if (!Array.isArray(arr)) {
-            return { ok: false, daily: [], source: "daily", err: "响应缺少 data.daily" };
-        }
-        const daily = [];
-        for (const it of arr) {
-            const d = String(it?.date ?? "").slice(0, 10);
-            if (!/^\d{4}-\d{2}-\d{2}$/.test(d))
-                continue;
-            daily.push({
-                date: d,
-                chat: Number(it?.chat) || 0,
-                feed: Number(it?.feed) || 0,
-            });
-        }
-        return { ok: true, daily, source: "daily" };
+        return parseTaskDaysPayload(j);
     }
     catch (err) {
         return { ok: false, daily: [], source: "none", err: err?.message };
@@ -89,7 +122,10 @@ async function judgePeriod(input) {
     const res = await (0, db_1.query)(`SELECT task_date, met FROM task_daily
       WHERE enrollment_id = ? AND task_date BETWEEN ? AND ?`, [enrollmentId, weekStart, weekEnd]);
     const marks = res.rows.map((r) => ({
-        date: String(r.task_date).slice(0, 10),
+        // task_date 是 DATE 列：mysql2 给的是 Date 对象。
+        // 这里曾写成 String(r.task_date).slice(0,10) → 'Tue Nov 03' → 周内过滤全部失效，
+        // 导致「连续 5 天」恒判 0 天、好用户被误罚。统一走 ymdOfOrEmpty。
+        date: (0, date_1.ymdOfOrEmpty)(r.task_date),
         met: Number(r.met) === 1,
     }));
     const streak = (0, streak_1.evaluateStreak)(marks, weekStart, weekEnd, needed);

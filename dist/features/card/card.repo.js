@@ -35,6 +35,11 @@ function mapRow(r) {
         coverUrl: r.cover_url ?? null,
         sortWeight: Number(r.sort_weight) || 0,
         listedAt: r.listed_at ?? null,
+        productId: r.product_id ?? null,
+        stock: r.stock == null ? null : Number(r.stock),
+        // 009 之前的行没有这两列值时按「仅自提/包邮」兜底，等价于旧行为
+        fulfillment: (r.fulfillment ?? "pickup"),
+        deliveryFee: r.delivery_fee == null ? 0 : Number(r.delivery_fee),
         title: r.title ?? "",
         subtitle: r.subtitle ?? null,
         merchantName: r.merchant_name ?? null,
@@ -80,8 +85,8 @@ async function insertDesignedCard(input) {
     await (0, db_1.query)(`INSERT INTO card
        (id, merchant_id, type, times, freq, reward_per_time, price, coverage, coverage_cap,
         per_merchant_quota, status, unit_price, periods, supply_price, category, cover_url, sort_weight,
-        title, subtitle, merchant_name, share_ratio)
-     VALUES (?,?,'times',?,'每周1次',?,?,1.0,?,?,'pending',?,?,?,?,?,?,?,?,?,?)`, [
+        title, subtitle, merchant_name, share_ratio, product_id, stock, fulfillment, delivery_fee)
+     VALUES (?,?,'times',?,'每周1次',?,?,1.0,?,?,'pending',?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
         id,
         input.merchantId,
         input.periods,
@@ -99,6 +104,10 @@ async function insertDesignedCard(input) {
         input.subtitle,
         input.merchantName,
         input.shareRatio,
+        input.productId,
+        input.stock,
+        input.fulfillment,
+        input.deliveryFee,
     ]);
     const row = await findCardById(id);
     if (!row)
