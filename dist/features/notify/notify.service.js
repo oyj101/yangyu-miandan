@@ -11,6 +11,8 @@ const db_1 = require("../../lib/db");
 const iso_week_1 = require("../period/iso-week");
 const period_types_1 = require("../period/period.types");
 const period_repo_1 = require("../period/period.repo");
+const wechat_1 = require("./wechat");
+const logger_1 = require("../../lib/logger");
 /**
  * 计算某期次在今天应该发哪些提醒。
  *
@@ -96,6 +98,24 @@ async function pushNotice(input) {
             input.refId ?? null,
             input.bizKey,
         ]);
+        // 站内信新增成功 → 附带微信模板推送（仅新增时推，重复扫描不重复骚扰）。
+        // 微信是附加通道：失败只记录日志，绝不回滚站内信，也不抛错影响主链路。
+        (0, wechat_1.pushWechatTemplate)({
+            yangyuUid: input.userId,
+            title: input.title,
+            body: input.body,
+            scene: input.type,
+            fields: input.fields,
+        })
+            .then((r) => {
+            if (!r.sent) {
+                logger_1.logger.warn("[notify] 微信推送未送达 uid=%s type=%s state=%s errcode=%s err=%s", input.userId, input.type, r.state, r.errcode, r.error);
+            }
+            else {
+                logger_1.logger.info("[notify] 微信推送已送达 uid=%s type=%s", input.userId, input.type);
+            }
+        })
+            .catch((e) => logger_1.logger.warn("[notify] 微信推送异常 uid=%s %s", input.userId, e?.message));
         return true;
     }
     catch (err) {
@@ -108,6 +128,17 @@ async function pushNotice(input) {
  * 每日扫描（cron 建议 09:00 + 20:00 各一次）。
  * 只扫"在办且本周内"的期次，历史期次不重复打扰。
  */
+/** DATE 列经 mysql2 返回本地零点 Date 对象；String() 会变成 "Mon Oct 26" 这类
+ *  长格式，导致 dayDiff 失效、dueNotices 恒空。必须按本地时区格式化 YYYY-MM-DD。 */
+function dateStr(v) {
+    if (v instanceof Date) {
+        const y = v.getFullYear();
+        const m = String(v.getMonth() + 1).padStart(2, "0");
+        const d = String(v.getDate()).padStart(2, "0");
+        return y + "-" + m + "-" + d;
+    }
+    return String(v ?? "").slice(0, 10);
+}
 async function runNoticeScan(now = new Date()) {
     const today = (0, iso_week_1.ymd)((0, iso_week_1.dateOnly)(now));
     const res = await (0, db_1.query)(`SELECT * FROM period
@@ -122,8 +153,8 @@ async function runNoticeScan(now = new Date()) {
             enrollmentId: r.enrollment_id,
             userId: r.user_id,
             periodNo: Number(r.period_no),
-            weekStart: String(r.week_start).slice(0, 10),
-            weekEnd: String(r.week_end).slice(0, 10),
+            weekStart: dateStr(r.week_start),
+            weekEnd: dateStr(r.week_end),
             taskMet: Number(r.task_met) === 1,
             checkinId: r.checkin_id || null,
             expired: Number(r.expired) === 1,
@@ -139,6 +170,12 @@ async function runNoticeScan(now = new Date()) {
                 refType: "period",
                 refId: p.id,
                 bizKey: `${n.type}:${p.id}`,
+                // 模板 52850：character_string2 只收字母/数字/符号（中文非法，20261026 实测），
+                // 用期次号 P{n}；time3=本周核销截止时间。
+                fields: {
+                    character_string2: `P${p.periodNo}`,
+                    time3: `${p.weekEnd} 23:59`,
+                },
             });
             if (ok) {
                 sent += 1;

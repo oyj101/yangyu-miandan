@@ -182,5 +182,17 @@ exports.config = {
         base: process.env.WALLET_BASE ?? "http://127.0.0.1:8100/api/v2",
         serviceKey: process.env.WALLET_SERVICE_KEY ?? "",
     },
+    /**
+     * 微信模板消息（临期提醒附加通道）。模板 52850「订座结果提醒」。
+     * const1 是枚举管控字段：enumResult 的值必须在公众号后台「管理枚举值」里配置过，
+     * 否则微信恒拒 47003（20261026 实测）。character_string2 只收字母/数字/符号。
+     */
+    wechat: {
+        templateId: process.env.WX_TEMPLATE_ID ||
+            "uKTRs7ayORy5vnu0HMWj2PRXGQ_o4rJPTbRL_DLJfBs",
+        enumResult: process.env.WX_ENUM_RESULT || "核销提醒",
+        thingUser: process.env.WX_THING_USER || "养鱼用户",
+        thingStore: process.env.WX_THING_STORE || "养鱼免单",
+    },
 };
 //# sourceMappingURL=index.js.map
