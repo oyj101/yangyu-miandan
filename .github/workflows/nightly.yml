@@ -1,0 +1,37 @@
+# ═══════════════════════════════════════════════════════════════
+# 每日跨机体检 · 薄 caller（实现在组织级模板仓 _law-guard.yml）
+#
+# 为什么还需要这条：git hooks 只守「提交那一刻」，
+# 线上的手工改动 / 同步漏 / 软链被删 没人守。
+# 每天 02:17 CST 跑一次，留证到 artifact。
+# ═══════════════════════════════════════════════════════════════
+name: 巡检 · 每日跨机一致性
+
+on:
+  schedule:
+    - cron: '17 18 * * *'      # 02:17 CST
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    uses: oyj101/.github/.github/workflows/_law-guard.yml@main
+    with:
+      runs_on: '["self-hosted","Linux","X64","octo-139"]'
+      check_replicas: true
+      check_sdk: true
+      fail_fast: true
+
+  services:
+    name: 服务健康（yangyu 双机）
+    runs-on: ['self-hosted', 'Linux', 'X64', 'octo-139']
+    steps:
+      - name: 139 本机 /health
+        run: |
+          set -uo pipefail
+          B=$(curl -sS --max-time 3 http://127.0.0.1:8080/health 2>/dev/null || true)
+          C=$(printf '%s' "$B" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(String(JSON.parse(s).code??"NO_CODE"))}catch(e){process.stdout.write("PARSE_FAIL")}})')
+          [ "$C" = "0" ] || { echo "::error::139 yangyu /health 异常 code=$C"; exit 1; }
+          echo "✅ 139 yangyu 健康"

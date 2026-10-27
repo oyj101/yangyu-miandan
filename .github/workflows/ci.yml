@@ -1,0 +1,122 @@
+# ═══════════════════════════════════════════════════════════════
+# 养鱼免单（Express+TS · 8080 · 双机部署）· 薄 caller
+# 放到 yangyu-miandan 仓的 .github/workflows/ci.yml
+#
+# 这是全仓第一个接入统一模板的仓，作为样板。
+# 原先仓内自写的 ci.yml / cd.yml / scripts/*.sh 已提升到组织级模板仓，
+# 本仓只保留这一个文件。
+# ═══════════════════════════════════════════════════════════════
+name: CI · yangyu-miandan
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      deploy_target:
+        required: true
+        default: pre
+        type: choice
+        options: [pre, prod]
+      run_migration:
+        description: '执行迁移（会先 mysqldump 备份）'
+        required: false
+        default: false
+        type: boolean
+      dry_run:
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: ci-yangyu-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  TZ: Asia/Shanghai
+
+jobs:
+  law:
+    uses: oyj101/.github/.github/workflows/_law-guard.yml@main
+    with:
+      check_fastapi_trap: false
+
+  build:
+    uses: oyj101/.github/.github/workflows/_build.yml@main
+    with:
+      service: yangyu-miandan
+      stack: node
+      node_version: '20'
+      runs_on: '["ubuntu-latest"]'
+      install_cmd: 'npm ci'
+      lint_cmd: 'npm run typecheck'
+      # 必须先 migrate 再跑测试：db_service 起了 MariaDB 后 dbReady() 会返回 true，
+      # 那 2 个 DB 用例会真跑 INSERT；若库是空的（没建表）就直接失败，而不是 skip。
+      # --reporter=json 供「用例数基线校验」用（见 min_tests）。
+      test_cmd: 'npm run migrate && npm test -- --reporter=default --reporter=json --outputFile=vitest-report.json'
+      # 用例数基线：199（197 passed + 2 skipped）。
+      # 防的是「报告全绿但静默少跑一个测试文件」——本地沙箱环境实测出现过
+      # 17→16 文件 / 199→174 用例、退出码却仍是 0 的假绿。
+      min_tests: '199'
+      build_cmd: 'npm run build'
+      artifact_paths: 'dist migrations package.json package-lock.json sdk'
+      db_service: true
+      db_port: '3399'
+      tz: Asia/Shanghai
+
+  integration:
+    needs: build
+    if: false   # TODO：全链路联调需 DB 迁移后跑，接进 _build 的 test_cmd 更合适
+    uses: oyj101/.github/.github/workflows/_build.yml@main
+    with:
+      service: yangyu-miandan
+      stack: node
+      test_cmd: 'npm run migrate && node dist/integration-test.js'
+      db_service: true
+      db_port: '3399'
+
+  deploy-pre:
+    needs: [law, build]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    uses: oyj101/.github/.github/workflows/_deploy.yml@main
+    with:
+      service: yangyu-miandan
+      target: pre
+      runs_on: '["self-hosted","Linux","X64","octo-118"]'
+      runtime: pm2
+      stack: node
+      app_dir: /opt/yangyu-miandan
+      pm2_app: yangyu-miandan
+      health_url: http://127.0.0.1:8080/health
+      port: '8080'
+      sync_paths: 'dist migrations package.json package-lock.json'
+      run_migration: ${{ github.event.inputs.run_migration || false }}
+      migrate_cmd: 'npm run migrate'
+      dry_run: ${{ github.event.inputs.dry_run || false }}
+      tz: Asia/Shanghai
+
+  deploy-prod:
+    needs: [law, build, deploy-pre]
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_target == 'prod'
+    uses: oyj101/.github/.github/workflows/_deploy.yml@main
+    with:
+      service: yangyu-miandan
+      target: prod
+      runs_on: '["self-hosted","Linux","X64","octo-139"]'
+      runtime: pm2
+      stack: node
+      app_dir: /opt/yangyu-miandan
+      pm2_app: yangyu-miandan
+      health_url: http://127.0.0.1:8080/health
+      port: '8080'
+      sync_paths: 'dist migrations package.json package-lock.json'
+      run_migration: ${{ github.event.inputs.run_migration || false }}
+      migrate_cmd: 'npm run migrate'
+      dry_run: ${{ github.event.inputs.dry_run || false }}
+      tz: Asia/Shanghai
