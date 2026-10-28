@@ -112,7 +112,6 @@ jobs:
     # 「needs.deploy 减 pre.result」而求值报错（表现为该 job 不创建、run 却 failure）。
     # 收窄为 needs: [law, build] 后：上游失败 → prod 原生自动 skip；上游成功 → 正常执行。
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_target == 'prod'
-    environment: production
     uses: xiaozhangyu-ai/.github/.github/workflows/_deploy.yml@main
     timeout-minutes: 30
     with:
