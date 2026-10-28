@@ -120,3 +120,8 @@ jobs:
       migrate_cmd: 'npm run migrate'
       dry_run: ${{ github.event.inputs.dry_run || false }}
       tz: Asia/Shanghai
+
+  probe:
+    uses: xiaozhangyu-ai/octo-shared/.github/workflows/hello.yml@main
+    with:
+      who: octo-shared
