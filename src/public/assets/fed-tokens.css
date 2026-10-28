@@ -1,0 +1,95 @@
+/* 养鱼免单后台页 · 设计令牌 v2（鱼的视觉系统 · 2026-10-16 重写）
+ * 部署：/opt/yangyu-miandan/src/public/assets/fed-tokens.css（商户/运营页共用）
+ * 变更：原为 H6 暖棕调，与 ai 站莓酱红×深海绿皮肤冲突 → 改为 ai 站基底 + 鱼系点缀（水青#1B7A7A/鳍橙#F2A65A）
+ * 铁律：保留全部既有类名（.topbar/.brand/.container/.card/.btn/.pill.*/table/.toast/.muted/.row/label/input）
+ *      H2 禁装饰 box-shadow（用发丝边）；§7 圆角∈{18,12,8,2}；EOL=LF；暗色跟随系统+data-theme
+ */
+:root {
+  --paper: #FBF5EA;          /* 暖米纸（ai 站基底） */
+  --paper-2: #FDFAF4;
+  --paper-3: #ffffff;
+  --ink-900: #2b2118;
+  --ink-800: #3d3026;
+  --ink-500: #6b5d4f;
+  --hair: #B08A46;          /* 古铜金发丝边 */
+  --hair-soft: #efe6d6;
+  --octo-red: #ED6927;      /* 莓酱红（ai 站主色，CTA） */
+  --octo-red-600: #d4561c;
+  --aqua: #1B7A7A;          /* 鱼系水青（新增主语义色） */
+  --aqua-soft: #E3F1F1;
+  --fin: #F2A65A;           /* 鱼系鳍橙（点缀） */
+  --x-r-lg: 18px;           /* §7 圆角 {18,12,8,2} */
+  --x-r-md: 12px;
+  --x-r-sm: 8px;
+  --x-r-xs: 2px;
+  --x-sp-3: 12px;
+  --x-sp-4: 16px;
+  --x-sp-5: 20px;
+  --x-shadow: none;         /* H2 铁律：禁装饰阴影 */
+  --fs-12: 12px;
+  --fs-14: 14px;
+  --fs-16: 16px;
+  --fs-20: 20px;
+  --ls-sm: 0.04em;
+  --font-sans: -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-serif: "Songti SC", "STSong", Georgia, serif;
+}
+[data-theme="dark"] {
+  --paper: #13201c; --paper-2: #1b2c26; --paper-3: #21342d;
+  --ink-900: #f3ece1; --ink-800: #e6dccb; --ink-500: #b9a890;
+  --hair: #3a4f47; --hair-soft: #243a33; --aqua-soft: #16302f;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #13201c; --paper-2: #1b2c26; --paper-3: #21342d;
+    --ink-900: #f3ece1; --ink-800: #e6dccb; --ink-500: #b9a890;
+    --hair: #3a4f47; --hair-soft: #243a33; --aqua-soft: #16302f;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--paper); color: var(--ink-800);
+  font-family: var(--font-sans); font-size: var(--fs-14); line-height: 1.6;
+}
+.topbar {
+  padding: var(--x-sp-4) var(--x-sp-5); background: var(--paper-3);
+  border-bottom: 1px solid var(--hair); display: flex; align-items: center; gap: 10px;
+  position: sticky; top: 0; z-index: 50;
+}
+.topbar .brand { font-family: var(--font-serif); font-weight: 700; font-size: var(--fs-20); letter-spacing: var(--ls-sm); }
+.topbar .brand small { color: var(--octo-red); font-weight: 600; }
+.container { max-width: 880px; margin: 0 auto; padding: var(--x-sp-5); }
+.card {
+  background: var(--paper-3); border: 1px solid var(--hair); border-radius: var(--x-r-lg);
+  padding: var(--x-sp-5); margin-bottom: var(--x-sp-4);
+}
+.card h2 { margin: 0 0 14px; font-family: var(--font-serif); font-size: var(--fs-16); letter-spacing: var(--ls-sm); }
+label { display: block; font-size: var(--fs-12); color: var(--ink-500); margin: 12px 0 6px; letter-spacing: var(--ls-sm); }
+input, select, textarea {
+  width: 100%; padding: 10px 12px; border: 1px solid var(--hair); border-radius: var(--x-r-md);
+  background: var(--paper-2); color: var(--ink-900); font-size: var(--fs-14); font-family: inherit;
+}
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--aqua); }
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 10px 18px; border: none; border-radius: var(--x-r-md); cursor: pointer;
+  background: var(--octo-red); color: #fff; font-size: var(--fs-14); font-weight: 600; letter-spacing: var(--ls-sm);
+}
+.btn[disabled] { opacity: .5; cursor: not-allowed; }
+.btn.ghost { background: transparent; color: var(--octo-red); border: 1px solid var(--hair); }
+.btn.accent { background: var(--aqua); }
+.row { display: flex; gap: 12px; flex-wrap: wrap; }
+.row > * { flex: 1; min-width: 160px; }
+.pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: var(--fs-12); border: 1px solid var(--hair); }
+.pill.pending { color: #9a7b2e; border-color: #e3cf94; background: #fbf3df; }
+.pill.active { color: #2f7d4f; border-color: #bfe3cd; background: #eafaf1; }
+.pill.offline { color: #9a3b2e; border-color: #eccfc8; background: #fbeeea; }
+.pill.normal { color: #2f7d4f; border-color: #bfe3cd; background: #eafaf1; }
+.pill.pause2, .pill.pause6 { color: #9a7b2e; border-color: #e3cf94; background: #fbf3df; }
+.pill.exited { color: #9a3b2e; border-color: #eccfc8; background: #fbeeea; }
+table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--hair-soft); font-size: var(--fs-12); }
+th { color: var(--ink-500); font-weight: 600; letter-spacing: var(--ls-sm); }
+.toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--ink-900); color: #fff; padding: 10px 18px; border-radius: 999px; font-size: var(--fs-12); opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 9999; }
+.toast.show { opacity: 1; }
+.muted { color: var(--ink-500); font-size: var(--fs-12); }

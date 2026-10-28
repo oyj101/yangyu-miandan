@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>养鱼免单 · 商户客户端核销</title>
+  <link rel="stylesheet" href="./assets/fed-tokens.css" />
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">同城智慧商业联邦 <small>· 商户客户端</small></div>
+    <span class="muted" style="margin-left:auto" id="who"></span>
+  </div>
+  <div class="container" id="app"></div>
+  <div class="toast"></div>
+
+  <script type="module">
+    import { api, toast } from "./assets/api.js";
+    const merchantId = new URLSearchParams(location.search).get("m") || "M001";
+    document.getElementById("who").textContent = "客户端 " + merchantId;
+    try { await api.login("cashier_" + merchantId, "CASHIER", merchantId); }
+    catch (e) { toast("登录失败：" + e.message); }
+    const app = document.getElementById("app");
+
+    app.innerHTML = `
+      <div class="card"><h2>到店核销</h2>
+        <label>入渔记录 ID（扫码/输号）</label>
+        <input id="eid" placeholder="enrollment id" />
+        <button class="btn" id="go" style="margin-top:12px">核销履约</button>
+        <p class="muted">幂等：重复核销自动拦截；停奖期记录履约但暂停发奖。</p>
+        <div id="result"></div>
+      </div>`;
+
+    document.getElementById("go").onclick = async () => {
+      const eid = document.getElementById("eid").value.trim();
+      if (!eid) return toast("请输入入渔 ID");
+      try {
+        const r = await api.checkin(eid);
+        document.getElementById("result").innerHTML = `
+          <div class="card" style="margin-top:12px">
+            <p>发奖：<b>${r.rewarded ? "是 +¥" + r.rewardAmount : "否（暂停/退出）"}</b></p>
+            <p>当前状态：<span class="pill ${r.status}">${r.status}</span></p>
+            <p>剩余暂停次数：${r.pausedRemaining}</p>
+          </div>`;
+        toast("核销成功");
+      } catch (e) { toast("核销失败：" + e.message); }
+    };
+  </script>
+</body>
+</html>
