@@ -32,7 +32,7 @@ on:
 
 concurrency:
   group: ci-yangyu-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -85,7 +85,6 @@ jobs:
     needs: [law, build]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     uses: xiaozhangyu-ai/.github/.github/workflows/_deploy.yml@main
-    timeout-minutes: 30
     with:
       run_id: ${{ github.run_id }}
       service: yangyu-miandan
@@ -113,7 +112,6 @@ jobs:
     # 收窄为 needs: [law, build] 后：上游失败 → prod 原生自动 skip；上游成功 → 正常执行。
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_target == 'prod'
     uses: xiaozhangyu-ai/.github/.github/workflows/_deploy.yml@main
-    timeout-minutes: 30
     with:
       run_id: ${{ github.run_id }}
       service: yangyu-miandan
