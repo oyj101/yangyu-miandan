@@ -135,22 +135,3 @@ jobs:
     uses: xiaozhangyu-ai/octo-shared/.github/workflows/hello.yml@main
     with:
       who: octo-shared
-  notify:
-    name: 告警 · 失败通知
-    needs: [law, build, deploy-pre, deploy-prod]
-    if: always() && contains(needs.*.result, 'failure')
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: 推送告警（未配 webhook 时降级为日志）
-        env:
-          WEBHOOK: ${{ secrets.OCTO_ALERT_WEBHOOK }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          if [ -z "$WEBHOOK" ]; then
-            echo "::warning::未配置 OCTO_ALERT_WEBHOOK，告警降级为日志"
-            exit 0
-          fi
-          curl -sS --max-time 10 -X POST "$WEBHOOK" \
-            -H 'Content-Type: application/json' \
-            -d "{\"text\":\"[CI FAIL] ${{ github.repository }} ${RUN_URL}\"}"
