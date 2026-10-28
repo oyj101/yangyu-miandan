@@ -86,6 +86,7 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     uses: xiaozhangyu-ai/.github/.github/workflows/_deploy.yml@main
     with:
+      run_id: ${{ github.run_id }}
       service: yangyu-miandan
       target: pre
       runs_on: '["self-hosted","Linux","X64","octo-118"]'
@@ -106,6 +107,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_target == 'prod'
     uses: xiaozhangyu-ai/.github/.github/workflows/_deploy.yml@main
     with:
+      run_id: ${{ github.run_id }}
       service: yangyu-miandan
       target: prod
       runs_on: '["self-hosted","Linux","X64","octo-139"]'
