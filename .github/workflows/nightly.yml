@@ -35,3 +35,39 @@ jobs:
           C=$(printf '%s' "$B" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(String(JSON.parse(s).code??"NO_CODE"))}catch(e){process.stdout.write("PARSE_FAIL")}})')
           [ "$C" = "0" ] || { echo "::error::139 yangyu /health 异常 code=$C"; exit 1; }
           echo "✅ 139 yangyu 健康"
+  watchdog:
+    name: 看门狗 · 卡死/离线检测
+    needs: [guard]
+    if: always()
+    runs-on: ubuntu-latest          # 刻意用 GitHub 托管：本机 runner 卡死时它仍能跑
+    timeout-minutes: 10
+    permissions:
+      actions: read
+    steps:
+      - name: 检测排队/运行超时的任务
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WEBHOOK: ${{ secrets.OCTO_ALERT_WEBHOOK }}
+        run: |
+          set -uo pipefail
+          STALE_MIN=20
+          NOW=$(date -u +%s)
+          BAD=""
+          for st in queued in_progress; do
+            for r in $(gh api "repos/${{ github.repository }}/actions/runs?status=${st}&per_page=20" --jq '.workflow_runs[].run_id'); do
+              TS=$(gh api "repos/${{ github.repository }}/actions/runs/${r}" --jq '.created_at')
+              AGE=$(( (NOW - $(date -u -d "${TS}" +%s)) / 60 ))
+              if [ "${AGE}" -ge "${STALE_MIN}" ]; then
+                BAD="${BAD}${st}#${r} 已 ${AGE} 分钟; "
+              fi
+            done
+          done
+          if [ -n "${BAD}" ]; then
+            echo "::error::发现卡死任务: ${BAD}"
+            if [ -n "${WEBHOOK}" ]; then
+              curl -sS --max-time 10 -X POST "${WEBHOOK}" -H 'Content-Type: application/json' \
+                -d "{\"text\":\"[CI STUCK] ${{ github.repository }}: ${BAD}\"}" || true
+            fi
+            exit 1
+          fi
+          echo "✅ 无卡死任务（阈值 ${STALE_MIN} 分钟）"
