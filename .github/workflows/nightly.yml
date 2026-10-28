@@ -50,7 +50,7 @@ jobs:
           WEBHOOK: ${{ secrets.OCTO_ALERT_WEBHOOK }}
         run: |
           set -uo pipefail
-          STALE_MIN=20
+          STALE_MIN=0
           NOW=$(date -u +%s)
           # 自检：读不到「本次运行」的信息说明 API/凭据异常 —— 硬失败，绝不静默放行
           SELF_TS=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}" --jq '.created_at' 2>/dev/null || true)
