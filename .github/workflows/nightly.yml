@@ -50,7 +50,7 @@ jobs:
           WEBHOOK: ${{ secrets.OCTO_ALERT_WEBHOOK }}
         run: |
           set -uo pipefail
-          STALE_MIN=20
+          STALE_MIN=0
           NOW=$(date -u +%s)
           BAD=""
           for st in queued in_progress; do
