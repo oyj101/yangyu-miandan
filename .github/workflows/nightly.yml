@@ -37,7 +37,7 @@ jobs:
           echo "✅ 139 yangyu 健康"
   watchdog:
     name: 看门狗 · 卡死/离线检测
-    needs: [guard]
+    # 刻意不 needs 任何 job：被依赖的 job 一旦卡死，看门狗就永远跑不起来（run#4 实证）
     if: always()
     runs-on: ubuntu-latest          # 刻意用 GitHub 托管：本机 runner 卡死时它仍能跑
     timeout-minutes: 10
@@ -50,7 +50,7 @@ jobs:
           WEBHOOK: ${{ secrets.OCTO_ALERT_WEBHOOK }}
         run: |
           set -uo pipefail
-          STALE_MIN=0
+          STALE_MIN=20
           NOW=$(date -u +%s)
           # 自检：读不到「本次运行」的信息说明 API/凭据异常 —— 硬失败，绝不静默放行
           SELF_TS=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}" --jq '.created_at' 2>/dev/null || true)
