@@ -52,22 +52,40 @@ jobs:
           set -uo pipefail
           STALE_MIN=0
           NOW=$(date -u +%s)
+          # 自检：读不到「本次运行」的信息说明 API/凭据异常 —— 硬失败，绝不静默放行
+          SELF_TS=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}" --jq '.created_at' 2>/dev/null || true)
+          if [ -z "$SELF_TS" ]; then
+            echo "::error::看门狗自检失败：读不到本次 run 的 created_at（API 或凭据异常）"
+            exit 1
+          fi
+          echo "自检通过：本次 run 创建于 $SELF_TS"
           BAD=""
+          SCANNED=0
           for st in queued in_progress; do
-            for r in $(gh api "repos/${{ github.repository }}/actions/runs?status=${st}&per_page=20" --jq '.workflow_runs[].run_id'); do
-              TS=$(gh api "repos/${{ github.repository }}/actions/runs/${r}" --jq '.created_at')
-              AGE=$(( (NOW - $(date -u -d "${TS}" +%s)) / 60 ))
-              if [ "${AGE}" -ge "${STALE_MIN}" ]; then
+            IDS=$(gh api "repos/${{ github.repository }}/actions/runs?status=${st}&per_page=50" --jq '[.workflow_runs[].run_id]|join(" ")' 2>/dev/null || true)
+            for r in $IDS; do
+              TS=$(gh api "repos/${{ github.repository }}/actions/runs/${r}" --jq '.created_at' 2>/dev/null || true)
+              if [ -z "$TS" ]; then
+                echo "::error::读不到 run ${r} 的 created_at —— 检测不可信，硬失败"
+                exit 1
+              fi
+              SCANNED=$((SCANNED + 1))
+              AGE=$(( (NOW - $(date -u -d "$TS" +%s)) / 60 ))
+              if [ "$AGE" -ge "$STALE_MIN" ]; then
                 BAD="${BAD}${st}#${r} 已 ${AGE} 分钟; "
               fi
             done
           done
-          if [ -n "${BAD}" ]; then
+          echo "已扫描 ${SCANNED} 个 queued/in_progress 任务（阈值 ${STALE_MIN} 分钟）"
+          if [ "$SCANNED" -eq 0 ]; then
+            echo "::warning::无 queued/in_progress 任务（若 runner 全掉线，排队任务会在下一轮被检出）"
+          fi
+          if [ -n "$BAD" ]; then
             echo "::error::发现卡死任务: ${BAD}"
-            if [ -n "${WEBHOOK}" ]; then
-              curl -sS --max-time 10 -X POST "${WEBHOOK}" -H 'Content-Type: application/json' \
+            if [ -n "$WEBHOOK" ]; then
+              curl -sS --max-time 10 -X POST "$WEBHOOK" -H 'Content-Type: application/json' \
                 -d "{\"text\":\"[CI STUCK] ${{ github.repository }}: ${BAD}\"}" || true
             fi
             exit 1
           fi
-          echo "✅ 无卡死任务（阈值 ${STALE_MIN} 分钟）"
+          echo "✅ 无卡死任务"
