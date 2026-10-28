@@ -62,7 +62,7 @@ jobs:
           BAD=""
           SCANNED=0
           for st in queued in_progress; do
-            IDS=$(gh api "repos/${{ github.repository }}/actions/runs?status=${st}&per_page=50" --jq '[.workflow_runs[].run_id]|join(" ")' 2>/dev/null || true)
+            IDS=$(gh api "repos/${{ github.repository }}/actions/runs?status=${st}&per_page=50" --jq '[.workflow_runs[].id]|join(" ")' 2>/dev/null || true)
             for r in $IDS; do
               TS=$(gh api "repos/${{ github.repository }}/actions/runs/${r}" --jq '.created_at' 2>/dev/null || true)
               if [ -z "$TS" ]; then
