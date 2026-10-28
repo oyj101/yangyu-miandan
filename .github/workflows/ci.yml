@@ -103,20 +103,14 @@ jobs:
       tz: Asia/Shanghai
 
   deploy-prod:
-    needs: [law, build, deploy-pre]
-    # 关键：workflow_dispatch 下 deploy-pre 必然 skipped（其 if 限定 event_name=='push'），
-    # 而 GitHub 会把「依赖 skipped job 的下游 job」一并 skip —— 若不加 always() 并显式校验
-    # needs 结果，prod 演练会「run 显示绿，实际一步没执行」= 典型假绿。
-    # 注意：job id `deploy-pre` 含连字符，表达式里必须用 needs['deploy-pre'] 索引取值；
-    # 写成 needs.deploy-pre.result 会被解析成 needs.deploy 减 pre.result，求值报错，
-    # 表现为「该 job 完全不出现在 run 的 job 列表里、整个 run 却 failure」（push 下因 && 短路不暴露）。
-    if: >-
-      always()
-      && github.event_name == 'workflow_dispatch'
-      && github.event.inputs.deploy_target == 'prod'
-      && needs.law.result == 'success'
-      && needs.build.result == 'success'
-      && (needs['deploy-pre'].result == 'success' || needs['deploy-pre'].result == 'skipped')
+    needs: [law, build]
+    # 只有 dispatch 且 target=prod 才上生产。
+    # 注意：这里刻意不写 needs: deploy-pre —— 该 job 的 if 限定 event_name=='push'，
+    # dispatch 时必然 skipped，而依赖 skipped job 的下游会被连带 skip（需要 always() 兜底）；
+    # 更致命的是 job id 含连字符，在表达式里取 needs.deploy-pre.result 会被解析成
+    # 「needs.deploy 减 pre.result」而求值报错（表现为该 job 不创建、run 却 failure）。
+    # 收窄为 needs: [law, build] 后：上游失败 → prod 原生自动 skip；上游成功 → 正常执行。
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_target == 'prod'
     uses: xiaozhangyu-ai/.github/.github/workflows/_deploy.yml@main
     with:
       run_id: ${{ github.run_id }}
