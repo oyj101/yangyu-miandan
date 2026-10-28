@@ -43,12 +43,12 @@ env:
 
 jobs:
   law:
-    uses: oyj101/.github/.github/workflows/_law-guard.yml@main
+    uses: xiaozhangyu-ai/.github/.github/workflows/_law-guard.yml@main
     with:
       check_fastapi_trap: false
 
   build:
-    uses: oyj101/.github/.github/workflows/_build.yml@main
+    uses: xiaozhangyu-ai/.github/.github/workflows/_build.yml@main
     with:
       service: yangyu-miandan
       stack: node
@@ -73,7 +73,7 @@ jobs:
   integration:
     needs: build
     if: false   # TODO：全链路联调需 DB 迁移后跑，接进 _build 的 test_cmd 更合适
-    uses: oyj101/.github/.github/workflows/_build.yml@main
+    uses: xiaozhangyu-ai/.github/.github/workflows/_build.yml@main
     with:
       service: yangyu-miandan
       stack: node
@@ -84,7 +84,7 @@ jobs:
   deploy-pre:
     needs: [law, build]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    uses: oyj101/.github/.github/workflows/_deploy.yml@main
+    uses: xiaozhangyu-ai/.github/.github/workflows/_deploy.yml@main
     with:
       service: yangyu-miandan
       target: pre
@@ -104,7 +104,7 @@ jobs:
   deploy-prod:
     needs: [law, build, deploy-pre]
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_target == 'prod'
-    uses: oyj101/.github/.github/workflows/_deploy.yml@main
+    uses: xiaozhangyu-ai/.github/.github/workflows/_deploy.yml@main
     with:
       service: yangyu-miandan
       target: prod

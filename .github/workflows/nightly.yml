@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   guard:
-    uses: oyj101/.github/.github/workflows/_law-guard.yml@main
+    uses: xiaozhangyu-ai/.github/.github/workflows/_law-guard.yml@main
     with:
       runs_on: '["self-hosted","Linux","X64","octo-139"]'
       check_replicas: true
