@@ -97,9 +97,9 @@ jobs:
       health_url: http://127.0.0.1:8080/health
       port: '8080'
       sync_paths: 'dist migrations package.json package-lock.json'
-      run_migration: ${{ github.event.inputs.run_migration || false }}
+      run_migration: ${{ github.event.inputs.run_migration == 'true' }}
       migrate_cmd: 'npm run migrate'
-      dry_run: ${{ github.event.inputs.dry_run || false }}
+      dry_run: ${{ github.event.inputs.dry_run == 'true' }}
       tz: Asia/Shanghai
 
   deploy-prod:
@@ -124,9 +124,9 @@ jobs:
       health_url: http://127.0.0.1:8080/health
       port: '8080'
       sync_paths: 'dist migrations package.json package-lock.json'
-      run_migration: ${{ github.event.inputs.run_migration || false }}
+      run_migration: ${{ github.event.inputs.run_migration == 'true' }}
       migrate_cmd: 'npm run migrate'
-      dry_run: ${{ github.event.inputs.dry_run || false }}
+      dry_run: ${{ github.event.inputs.dry_run == 'true' }}
       tz: Asia/Shanghai
 
   probe:
