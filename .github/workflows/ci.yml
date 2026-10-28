@@ -104,7 +104,16 @@ jobs:
 
   deploy-prod:
     needs: [law, build, deploy-pre]
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_target == 'prod'
+    # 关键：workflow_dispatch 下 deploy-pre 必然 skipped（其 if 限定 event_name=='push'），
+    # 而 GitHub 会把「依赖 skipped job 的下游 job」一并 skip —— 若不加 always() 并显式校验
+    # needs 结果，prod 演练会「run 显示绿，实际一步没执行」= 典型假绿。
+    if: >-
+      always()
+      && github.event_name == 'workflow_dispatch'
+      && github.event.inputs.deploy_target == 'prod'
+      && needs.law.result == 'success'
+      && needs.build.result == 'success'
+      && (needs.deploy-pre.result == 'success' || needs.deploy-pre.result == 'skipped')
     uses: xiaozhangyu-ai/.github/.github/workflows/_deploy.yml@main
     with:
       run_id: ${{ github.run_id }}
