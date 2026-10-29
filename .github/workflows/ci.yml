@@ -49,6 +49,7 @@ jobs:
     uses: xiaozhangyu-ai/.github/.github/workflows/_law-guard.yml@main
     with:
       check_fastapi_trap: false
+      sdk_check_mode: 'log'   # 应急降级：只读 139 本地巡检日志，规避 139→119 出网抖动卡死 law job
 
   build:
     uses: xiaozhangyu-ai/.github/.github/workflows/_build.yml@main
