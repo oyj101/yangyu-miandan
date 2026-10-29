@@ -133,10 +133,6 @@ jobs:
       dry_run: ${{ github.event.inputs.dry_run == 'true' }}
       tz: Asia/Shanghai
 
-  probe:
-    uses: xiaozhangyu-ai/octo-shared/.github/workflows/hello.yml@main
-    with:
-      who: octo-shared
   notify:
     name: 告警 · 失败通知
     needs: [law, build, deploy-pre, deploy-prod]
