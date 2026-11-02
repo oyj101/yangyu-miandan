@@ -1,6 +1,7 @@
 import { badRequest, conflict, notFound, validationError } from "../../lib/errors";
 import { query, withTx, newId } from "../../lib/db";
 import { config } from "../../config";
+import { refundConfigSync } from "../reward/refund-config.service";
 import { Card } from "../card/card.types";
 import { findCardById } from "../card/card.repo";
 import {
@@ -85,7 +86,7 @@ export async function createPeriodsForEnrollment(input: {
   const first = firstFullWeek(input.purchasedAt);
   // 比例快照到每一期：卡上的 share_ratio 之后被运营改，已售期次的金额也不变。
   // 这是合同金额，不能随配置漂移（改比例只影响此后新生成的期次）。
-  const shareRatio = Number(card.shareRatio ?? config.package.shareRatioDefault);
+  const shareRatio = Number(card.shareRatio ?? refundConfigSync().refundShareRatio);
   const refundNowRatio = Math.round((1 - shareRatio) * 1000) / 1000;
   const rows: NewPeriodRow[] = [];
   for (let i = 0; i < periods; i++) {

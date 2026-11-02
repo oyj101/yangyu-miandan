@@ -10,6 +10,7 @@
  * 故新增字段只能追加，不能重命名（见 sdk/README.md 契约稳定性）。
  */
 import { config } from "../../config";
+import { refundConfigSync } from "../reward/refund-config.service";
 import { Card } from "../card/card.types";
 
 export interface ProjectView {
@@ -79,10 +80,10 @@ export function toProjectListView(card: Card, soldCount = 0): ProjectListView {
     periods,
     totalPrice: Math.round(unitPrice * periods * 100) / 100,
     freq: card.freq,
-    streakDays: config.package.streakDays,
+    streakDays: refundConfigSync().streakDays,
     soldCount,
     listedAt: card.listedAt,
-    refundClaim: `每期连续 ${config.package.streakDays} 天任务 + 到店核销，可全额返还至消费金`,
+    refundClaim: `每期连续 ${refundConfigSync().streakDays} 天任务 + 到店核销，可全额返还至消费金`,
   };
 }
 
@@ -90,7 +91,7 @@ export function toProjectView(card: Card, soldCount = 0): ProjectView {
   const unitPrice = card.unitPrice ?? 0;
   const periods = card.periods ?? 0;
   // 比例逐卡取：每张卡由运营在设计时决定"分多少"，不再统一 30%
-  const shareRatio = Number(card.shareRatio ?? config.package.shareRatioDefault);
+  const shareRatio = Number(card.shareRatio ?? refundConfigSync().refundShareRatio);
   return {
     id: card.id,
     // title 为空的存量卡（004 之前设计）用 id 兜底，避免宿主页面出现空标题
@@ -105,7 +106,7 @@ export function toProjectView(card: Card, soldCount = 0): ProjectView {
     freq: card.freq,
     refundNowRatio: Math.round((1 - shareRatio) * 1000) / 1000,
     refundShareRatio: shareRatio,
-    streakDays: config.package.streakDays,
+    streakDays: refundConfigSync().streakDays,
     soldCount,
     listedAt: card.listedAt,
   };

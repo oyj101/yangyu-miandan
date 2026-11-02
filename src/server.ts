@@ -6,8 +6,12 @@ import { createApp } from "./app";
 import { config } from "./config";
 import { logger } from "./lib/logger";
 import { pool } from "./lib/db";
+import { initRefundConfigCache } from "./features/reward/refund-config.service";
 
 const app = createApp();
+
+// 退款公式配置缓存预热（失败仅告警，env 缺省兜底，不阻断启动）
+void initRefundConfigCache();
 
 // 监听地址：默认仅绑回环，禁止直接暴露网卡。
 // 安全理由：服务统一由 nginx 在 HTTPS/域名层收口（认证、限流、日志、证书），

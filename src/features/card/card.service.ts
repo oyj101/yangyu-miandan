@@ -1,4 +1,5 @@
 import { config } from "../../config";
+import { refundConfigSync } from "../reward/refund-config.service";
 import { badRequest, conflict, notFound, validationError } from "../../lib/errors";
 import {
   insertCard,
@@ -206,7 +207,7 @@ export async function designPackageCard(
   }
 
   // ---------- 每卡分享分成（2026-10-21：逐卡可配，不再是全局 0.3） ----------
-  const shareRatio = Math.round((input.shareRatio ?? config.package.shareRatioDefault) * 1000) / 1000;
+  const shareRatio = Math.round((input.shareRatio ?? refundConfigSync().refundShareRatio) * 1000) / 1000;
   const check = evaluateShareRatio(unitPrice, supplyPrice, shareRatio, config.package.shareRatioMax);
   const supplyRatio = supplyPrice / unitPrice;
   let underSupplyRisk = false;

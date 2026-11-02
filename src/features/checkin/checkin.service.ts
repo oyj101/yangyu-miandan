@@ -1,6 +1,7 @@
 import { conflict, notFound } from "../../lib/errors";
 import { newId, withTx } from "../../lib/db";
 import { config } from "../../config";
+import { refundConfigSync } from "../reward/refund-config.service";
 import { isoWeekKey, isoWeekOf, ymd, dateOnly, addDays, parseYmd } from "../period/iso-week";
 import { findEnrollment, updateEnrollState, toState } from "../enrollment/enrollment.repo";
 import { ensurePaid, payGuardMessage } from "../enrollment/pay-guard";
@@ -95,7 +96,7 @@ export async function computeOnCheckinV2(
     userId: e.userId,
     weekStart: period.weekStart,
     weekEnd: period.weekEnd,
-    needed: config.package.streakDays,
+    needed: refundConfigSync().streakDays,
   });
 
   const state = toState(e);
