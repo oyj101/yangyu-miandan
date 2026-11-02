@@ -15,6 +15,9 @@ export interface Period {
   shareRatio: number;
   /** 核销即时退比例 = 1 - shareRatio */
   refundNowRatio: number;
+  /** 建期时按 caliber 固化的计划退额（011 迁移；旧行 NULL → doRefund 走旧公式兜底） */
+  refund70Planned: number | null;
+  refund30Planned: number | null;
   checkinId: string | null;
   taskMet: boolean;
   metDays: number;

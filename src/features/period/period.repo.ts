@@ -22,6 +22,9 @@ function mapRow(r: any): Period {
     // 006 快照列；旧行/未迁移环境回落到全局缺省，保证金额口径不会变成 NaN
     shareRatio: r.share_ratio == null ? 0.3 : Number(r.share_ratio),
     refundNowRatio: r.refund_now_ratio == null ? 0.7 : Number(r.refund_now_ratio),
+    // 011 计划退额：旧行 NULL → doRefund 走旧公式兜底
+    refund70Planned: r.refund70_planned == null ? null : Number(r.refund70_planned),
+    refund30Planned: r.refund30_planned == null ? null : Number(r.refund30_planned),
     checkinId: r.checkin_id || null,
     taskMet: Number(r.task_met) === 1,
     metDays: Number(r.met_days) || 0,
@@ -58,6 +61,9 @@ export interface NewPeriodRow {
   shareRatio: number;
   /** 核销即时退比例 = 1 - shareRatio */
   refundNowRatio: number;
+  /** 计划退额（011 迁移；可缺省 → 落 NULL，退款走旧公式兜底） */
+  refund70Planned?: number | null;
+  refund30Planned?: number | null;
 }
 
 /**
@@ -66,7 +72,7 @@ export interface NewPeriodRow {
  */
 export async function insertPeriods(rows: NewPeriodRow[]): Promise<number> {
   if (rows.length === 0) return 0;
-  const cols = 14;
+  const cols = 16;
   const placeholders = rows.map(() => `(${Array(cols).fill("?").join(",")})`).join(",");
   const params: unknown[] = [];
   for (const r of rows) {
@@ -84,14 +90,16 @@ export async function insertPeriods(rows: NewPeriodRow[]): Promise<number> {
       r.unitPrice,
       r.supplyPrice,
       r.shareRatio,
-      r.refundNowRatio
+      r.refundNowRatio,
+      r.refund70Planned ?? null,
+      r.refund30Planned ?? null
     );
   }
   await query(
     `INSERT INTO period
        (id, enrollment_id, card_id, user_id, merchant_id, period_no,
         iso_year, iso_week, week_start, week_end, unit_price, supply_price,
-        share_ratio, refund_now_ratio)
+        share_ratio, refund_now_ratio, refund70_planned, refund30_planned)
      VALUES ${placeholders}`,
     params
   );

@@ -63,6 +63,38 @@ export function assertPackageCard(card: Card): {
 }
 
 /**
+ * 期次计划退额（011，方案 A 建期定案）。纯函数，便于测试。
+ * - unit  口径: 每期 round2(unitPrice × ratio)（与退款旧公式逐分一致，零行为变化）
+ * - total 口径: total = round2(unitPrice × periods × ratio)；
+ *   前 N-1 期 = round2(total / periods)，末期 = total − 前 N-1 期之和（待遇差额并入末位，
+ *   保证 Σplanned = round2(总额 × ratio) 精确匹配总额承诺）
+ * 快照律：建期时按当期 caliber 固化进期次行，之后改配置不影响已售期次金额。
+ */
+export function computePlannedAmounts(input: {
+  unitPrice: number;
+  periods: number;
+  refundNowRatio: number;
+  shareRatio: number;
+  caliber: "unit" | "total";
+}): { refund70Planned: number[]; refund30Planned: number[] } {
+  const { unitPrice, periods, refundNowRatio, shareRatio, caliber } = input;
+  const build = (ratio: number): number[] => {
+    if (caliber === "unit") {
+      return Array.from({ length: periods }, () => round2(unitPrice * ratio));
+    }
+    const total = round2(unitPrice * periods * ratio);
+    const per = periods > 0 ? round2(total / periods) : 0;
+    const out = Array.from({ length: periods }, () => per);
+    if (periods > 0) out[periods - 1] = round2(total - per * (periods - 1));
+    return out;
+  };
+  return {
+    refund70Planned: build(refundNowRatio),
+    refund30Planned: build(shareRatio),
+  };
+}
+
+/**
  * 生成该入渔的全部期次。幂等：已存在则直接返回。
  *
  * 首期 = 购买日所在 ISO 周的下一个周一（见 firstFullWeek 注释）。
@@ -88,6 +120,15 @@ export async function createPeriodsForEnrollment(input: {
   // 这是合同金额，不能随配置漂移（改比例只影响此后新生成的期次）。
   const shareRatio = Number(card.shareRatio ?? refundConfigSync().refundShareRatio);
   const refundNowRatio = Math.round((1 - shareRatio) * 1000) / 1000;
+  // 011（方案 A）：计划退额按当期 caliber 建期定案，固化为合同金额。
+  // unit 口径与旧公式逐分一致；total 口径末期待遇差额并入最后一期。
+  const planned = computePlannedAmounts({
+    unitPrice,
+    periods,
+    refundNowRatio,
+    shareRatio,
+    caliber: refundConfigSync().caliber,
+  });
   const rows: NewPeriodRow[] = [];
   for (let i = 0; i < periods; i++) {
     const w = i === 0 ? first : shiftWeek(first, i);
@@ -105,6 +146,8 @@ export async function createPeriodsForEnrollment(input: {
       supplyPrice,
       shareRatio,
       refundNowRatio,
+      refund70Planned: planned.refund70Planned[i],
+      refund30Planned: planned.refund30Planned[i],
     });
   }
 

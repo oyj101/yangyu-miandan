@@ -66,12 +66,14 @@ async function doRefund(periodId: string, kind: RefundKind): Promise<RefundResul
       throw badRequest("该入渔无实付记录，不可退费");
     }
 
-    const amount = round2(
-      p.unitPrice *
-        (kind === "refund70"
-          ? (p.refundNowRatio ?? globalNow)
-          : (p.shareRatio ?? globalShare))
-    );
+    // 011（方案 A）：建期时按 caliber 固化的计划退额优先；旧行（NULL）走旧公式兜底，
+    // 金额不变 —— 存量期次合同金额绝不漂移。
+    const amount =
+      kind === "refund70"
+        ? (p.refund70Planned ??
+          round2(p.unitPrice * (p.refundNowRatio ?? globalNow)))
+        : (p.refund30Planned ??
+          round2(p.unitPrice * (p.shareRatio ?? globalShare)));
     if (!(amount > 0)) throw badRequest("退费金额为 0，检查单价与比例配置");
 
     const key = idemKey(kind, periodId);
