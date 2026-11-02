@@ -8,7 +8,7 @@ exports.sweepExpired = sweepExpired;
 exports.extendPeriod = extendPeriod;
 const errors_1 = require("../../lib/errors");
 const db_1 = require("../../lib/db");
-const config_1 = require("../../config");
+const refund_config_service_1 = require("../reward/refund-config.service");
 const card_repo_1 = require("../card/card.repo");
 const iso_week_1 = require("./iso-week");
 const period_repo_1 = require("./period.repo");
@@ -63,7 +63,7 @@ async function createPeriodsForEnrollment(input) {
     const first = (0, iso_week_1.firstFullWeek)(input.purchasedAt);
     // 比例快照到每一期：卡上的 share_ratio 之后被运营改，已售期次的金额也不变。
     // 这是合同金额，不能随配置漂移（改比例只影响此后新生成的期次）。
-    const shareRatio = Number(card.shareRatio ?? config_1.config.package.shareRatioDefault);
+    const shareRatio = Number(card.shareRatio ?? (0, refund_config_service_1.refundConfigSync)().refundShareRatio);
     const refundNowRatio = Math.round((1 - shareRatio) * 1000) / 1000;
     const rows = [];
     for (let i = 0; i < periods; i++) {

@@ -4,7 +4,7 @@ exports.computeOnCheckinV2 = computeOnCheckinV2;
 exports.nextPeriodHint = nextPeriodHint;
 const errors_1 = require("../../lib/errors");
 const db_1 = require("../../lib/db");
-const config_1 = require("../../config");
+const refund_config_service_1 = require("../reward/refund-config.service");
 const iso_week_1 = require("../period/iso-week");
 const enrollment_repo_1 = require("../enrollment/enrollment.repo");
 const pay_guard_1 = require("../enrollment/pay-guard");
@@ -52,7 +52,7 @@ async function computeOnCheckinV2(enrollmentId, merchantId, now = new Date(), op
         userId: e.userId,
         weekStart: period.weekStart,
         weekEnd: period.weekEnd,
-        needed: config_1.config.package.streakDays,
+        needed: (0, refund_config_service_1.refundConfigSync)().streakDays,
     });
     const state = (0, enrollment_repo_1.toState)(e);
     const paused = state.pauseRemaining > 0;

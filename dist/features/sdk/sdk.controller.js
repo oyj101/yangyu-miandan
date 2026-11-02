@@ -22,6 +22,7 @@ const auth_1 = require("../../middleware/auth");
 const http_1 = require("../../lib/http");
 const errors_1 = require("../../lib/errors");
 const config_1 = require("../../config");
+const refund_config_service_1 = require("../reward/refund-config.service");
 const db_1 = require("../../lib/db");
 const card_repo_1 = require("../card/card.repo");
 const project_view_1 = require("./project.view");
@@ -55,8 +56,8 @@ exports.sdkRouter.get("/meta", (_req, res) => {
         // 金额口径：比例**逐卡不同**，这里只给缺省值，卡上的实际值见各卡 share.ratio
         rules: {
             refundNowRatio: config_1.config.package.refundRatioNow,
-            refundShareRatio: config_1.config.package.shareRatioDefault,
-            streakDays: config_1.config.package.streakDays,
+            refundShareRatio: (0, refund_config_service_1.refundConfigSync)().refundShareRatio,
+            streakDays: (0, refund_config_service_1.refundConfigSync)().streakDays,
             shareBindPolicy: config_1.config.share.bindPolicy,
             shareUnlockOnBind: config_1.config.share.unlockOnBind,
             refParam: config_1.config.share.refParam,
@@ -88,8 +89,8 @@ exports.sdkRouter.get("/bootstrap", (0, auth_1.authOptional)(), async (req, res,
             categories: cats,
             rules: {
                 refundNowRatio: config_1.config.package.refundRatioNow,
-                refundShareRatio: config_1.config.package.shareRatioDefault,
-                streakDays: config_1.config.package.streakDays,
+                refundShareRatio: (0, refund_config_service_1.refundConfigSync)().refundShareRatio,
+                streakDays: (0, refund_config_service_1.refundConfigSync)().streakDays,
                 shareBindPolicy: config_1.config.share.bindPolicy,
             },
         });
@@ -285,7 +286,7 @@ exports.sdkRouter.get("/share/link", (0, auth_1.auth)(["USER"]), async (req, res
             refParam: link.refParam,
             cardId: targetCardId,
             /** 这张卡的分享分成（逐卡不同，不再统一 30%） */
-            ratio: card?.shareRatio ?? config_1.config.package.shareRatioDefault,
+            ratio: card?.shareRatio ?? (0, refund_config_service_1.refundConfigSync)().refundShareRatio,
             unlocked: stats.unlockedCards > 0,
             invited: stats.invited,
             pendingPeriods: Number(pending.rows[0]?.n) || 0,
@@ -404,7 +405,7 @@ exports.sdkRouter.get("/mine", (0, auth_1.auth)(), async (req, res, next) => {
                  */
                 share: {
                     unlocked: !!e.shareUnlocked,
-                    ratio: card?.shareRatio ?? config_1.config.package.shareRatioDefault,
+                    ratio: card?.shareRatio ?? (0, refund_config_service_1.refundConfigSync)().refundShareRatio,
                     invited: bindStats.invited,
                     pendingPeriods: periods.filter((p) => !p.expired && (Number(p.refund70Amount) || 0) > 0 && (Number(p.refund30Amount) || 0) === 0).length,
                     action: e.shareUnlocked ? "done" : "share",

@@ -12,6 +12,7 @@ exports.listPublicCards = listPublicCards;
 exports.getGlobalParams = getGlobalParams;
 exports.setGlobalParam = setGlobalParam;
 const config_1 = require("../../config");
+const refund_config_service_1 = require("../reward/refund-config.service");
 const errors_1 = require("../../lib/errors");
 const card_repo_1 = require("./card.repo");
 const db_1 = require("../../lib/db");
@@ -171,7 +172,7 @@ async function designPackageCard(input, operator, opts = {}) {
         });
     }
     // ---------- 每卡分享分成（2026-10-21：逐卡可配，不再是全局 0.3） ----------
-    const shareRatio = Math.round((input.shareRatio ?? config_1.config.package.shareRatioDefault) * 1000) / 1000;
+    const shareRatio = Math.round((input.shareRatio ?? (0, refund_config_service_1.refundConfigSync)().refundShareRatio) * 1000) / 1000;
     const check = evaluateShareRatio(unitPrice, supplyPrice, shareRatio, config_1.config.package.shareRatioMax);
     const supplyRatio = supplyPrice / unitPrice;
     let underSupplyRisk = false;

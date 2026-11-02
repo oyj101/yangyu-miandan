@@ -3,18 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.toProjectListView = toProjectListView;
 exports.toProjectView = toProjectView;
 exports.promiseOf = promiseOf;
-/**
- * C 端投影（Project View）
- *
- * 铁律：这里用「白名单逐字段列举」，禁止 `{...card}` 展开。
- *   - supply_price 是商户成本，泄露 = 商户被比价 / 平台毛利公开；
- *   - coverage_cap、per_merchant_quota 是风控参数，C 端不需要；
- *   - 展开写法在某次加字段后会静默把新字段漏出去，白名单加字段必须动代码，可 review。
- *
- * 该投影同时是内联 SDK 的渲染契约：字段改名 = 破坏线上宿主页面，
- * 故新增字段只能追加，不能重命名（见 sdk/README.md 契约稳定性）。
- */
-const config_1 = require("../../config");
+const refund_config_service_1 = require("../reward/refund-config.service");
 function toProjectListView(card, soldCount = 0) {
     const unitPrice = card.unitPrice ?? 0;
     const periods = card.periods ?? 0;
@@ -28,17 +17,17 @@ function toProjectListView(card, soldCount = 0) {
         periods,
         totalPrice: Math.round(unitPrice * periods * 100) / 100,
         freq: card.freq,
-        streakDays: config_1.config.package.streakDays,
+        streakDays: (0, refund_config_service_1.refundConfigSync)().streakDays,
         soldCount,
         listedAt: card.listedAt,
-        refundClaim: `每期连续 ${config_1.config.package.streakDays} 天任务 + 到店核销，可全额返还至消费金`,
+        refundClaim: `每期连续 ${(0, refund_config_service_1.refundConfigSync)().streakDays} 天任务 + 到店核销，可全额返还至消费金`,
     };
 }
 function toProjectView(card, soldCount = 0) {
     const unitPrice = card.unitPrice ?? 0;
     const periods = card.periods ?? 0;
     // 比例逐卡取：每张卡由运营在设计时决定"分多少"，不再统一 30%
-    const shareRatio = Number(card.shareRatio ?? config_1.config.package.shareRatioDefault);
+    const shareRatio = Number(card.shareRatio ?? (0, refund_config_service_1.refundConfigSync)().refundShareRatio);
     return {
         id: card.id,
         // title 为空的存量卡（004 之前设计）用 id 兜底，避免宿主页面出现空标题
@@ -53,7 +42,7 @@ function toProjectView(card, soldCount = 0) {
         freq: card.freq,
         refundNowRatio: Math.round((1 - shareRatio) * 1000) / 1000,
         refundShareRatio: shareRatio,
-        streakDays: config_1.config.package.streakDays,
+        streakDays: (0, refund_config_service_1.refundConfigSync)().streakDays,
         soldCount,
         listedAt: card.listedAt,
     };

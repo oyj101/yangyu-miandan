@@ -7,7 +7,10 @@ const app_1 = require("./app");
 const config_1 = require("./config");
 const logger_1 = require("./lib/logger");
 const db_1 = require("./lib/db");
+const refund_config_service_1 = require("./features/reward/refund-config.service");
 const app = (0, app_1.createApp)();
+// 退款公式配置缓存预热（失败仅告警，env 缺省兜底，不阻断启动）
+void (0, refund_config_service_1.initRefundConfigCache)();
 // 监听地址：默认仅绑回环，禁止直接暴露网卡。
 // 安全理由：服务统一由 nginx 在 HTTPS/域名层收口（认证、限流、日志、证书），
 // 后端直接监听 0.0.0.0 会绕过网关被公网直连。确需本机以外访问时显式设置 HOST。
